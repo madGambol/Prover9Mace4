@@ -47,6 +47,38 @@ static int *Op_codes;
 static struct rule **Rules;
 static int Local_evals;
 
+/* The operator symbols recognized by $-evaluation, with the arity each one
+   is interned at.  These are kept in a table because str_to_sn() *creates*
+   any symbol that is not already in the symbol table, so they all have to
+   be interned before the symbol count that sizes Op_codes and Rules can be
+   taken.  See init_dollar_eval(). */
+
+static struct {
+  char *name;
+  int   arity;
+  int   op_code;
+} Dollar_ops[] = {
+  {"+",        2, SUM_OP},    {"*",   2, PROD_OP},  {"/",   2, DIV_OP},
+  {"mod",      2, MOD_OP},    {"min", 2, MIN_OP},   {"max", 2, MAX_OP},
+  {"abs",      2, ABS_OP},    {"-",   1, NEG_OP},
+
+  {"<",        2, LT_OP},     {"<=",  2, LE_OP},
+  {">",        2, GT_OP},     {">=",  2, GE_OP},
+
+  {"@<",       2, LLT_OP},    {"@<=", 2, LLE_OP},
+  {"@>",       2, LGT_OP},    {"@>=", 2, LGE_OP},
+
+  {"==",       2, ID_OP},     {"!==", 2, NID_OP},
+
+  {"variable", 1, VAR_OP},    {"constant", 1, CONST_OP},
+  {"ground",   1, GROUND_OP},
+
+  {"&&",       2, AND2_OP},   {"||",  2, OR2_OP},
+  {"&",        2, AND_OP},    {"|",   2, OR_OP},
+  {"if",       3, IF_OP}};
+
+#define NUM_DOLLAR_OPS ((int) (sizeof(Dollar_ops) / sizeof(Dollar_ops[0])))
+
 /*
  * memory management
  */
@@ -64,43 +96,30 @@ static int Local_evals;
 void init_dollar_eval(Clist rules)
 {
   Clist_pos p;
+  int i;
+  int symnums[NUM_DOLLAR_OPS];
+
+  /* Intern all of the operator symbols first.  str_to_sn() creates a symbol
+     that is not already in the symbol table, returning a symnum beyond the
+     current count, so the count must be taken afterwards.  The original code
+     took it first and sized Op_codes from it, then interned the symbols as
+     it indexed the array -- writing up to NUM_DOLLAR_OPS ints past the end
+     of it (confirmed with ASan on every production-mode example in the
+     manual, e.g. "set(production)" with 111 symbols already interned).
+     Rules, allocated from the same stale count, was undersized for the same
+     reason; it escaped only because every write to it is range-checked. */
+
+  for (i = 0; i < NUM_DOLLAR_OPS; i++)
+    symnums[i] = str_to_sn(Dollar_ops[i].name, Dollar_ops[i].arity);
 
   Symbols_size = greatest_symnum() + 1;
   Op_codes = calloc(Symbols_size, sizeof(int));
-  
-  Op_codes[str_to_sn("+", 2)]        = SUM_OP;
-  Op_codes[str_to_sn("*", 2)]        = PROD_OP;
-  Op_codes[str_to_sn("/", 2)]        = DIV_OP;
-  Op_codes[str_to_sn("mod", 2)]      = MOD_OP;
-  Op_codes[str_to_sn("min", 2)]      = MIN_OP;
-  Op_codes[str_to_sn("max", 2)]      = MAX_OP;
-  Op_codes[str_to_sn("abs", 2)]      = ABS_OP;
-  Op_codes[str_to_sn("-", 1)]        = NEG_OP;
-
-  Op_codes[str_to_sn("<", 2)]        = LT_OP;
-  Op_codes[str_to_sn("<=", 2)]       = LE_OP;
-  Op_codes[str_to_sn(">", 2)]        = GT_OP;
-  Op_codes[str_to_sn(">=", 2)]       = GE_OP;
-
-  Op_codes[str_to_sn("@<", 2)]       = LLT_OP;
-  Op_codes[str_to_sn("@<=", 2)]      = LLE_OP;
-  Op_codes[str_to_sn("@>", 2)]       = LGT_OP;
-  Op_codes[str_to_sn("@>=", 2)]      = LGE_OP;
-
-  Op_codes[str_to_sn("==", 2)]       = ID_OP;
-  Op_codes[str_to_sn("!==", 2)]      = NID_OP;
-
-  Op_codes[str_to_sn("variable", 1)] = VAR_OP;
-  Op_codes[str_to_sn("constant", 1)] = CONST_OP;
-  Op_codes[str_to_sn("ground", 1)]   = GROUND_OP;
-
-  Op_codes[str_to_sn("&&", 2)]       = AND2_OP;
-  Op_codes[str_to_sn("||", 2)]       = OR2_OP;
-  Op_codes[str_to_sn("&", 2)]        = AND_OP;
-  Op_codes[str_to_sn("|", 2)]        = OR_OP;
-  Op_codes[str_to_sn("if", 3)]       = IF_OP;
-
   Rules = calloc(Symbols_size, sizeof(void *));
+  if (Op_codes == NULL || Rules == NULL)
+    fatal_error("init_dollar_eval, out of memory");
+
+  for (i = 0; i < NUM_DOLLAR_OPS; i++)
+    Op_codes[symnums[i]] = Dollar_ops[i].op_code;
 
   for (p = rules->last; p; p = p->prev) {  /* backward */
     Topform c = p->c;

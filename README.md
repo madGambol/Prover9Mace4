@@ -59,7 +59,7 @@ The 5 that pass on both sides are deliberate "must not regress" controls.
 | | |
 | --- | --- |
 | **Build blockers** | K&R function definitions and implicit `int`, both hard errors under C23; `-lm` placed before the objects that need it; `make` renaming a binary over a directory that does not exist yet |
-| **Memory safety** | Four stack buffer overflows reachable from input or the command line (Mace4's domain-size banner, long input filenames, `prooftrans -label`, and an unbounded `fscanf("%s")` in the proof reader); an uncontrolled format string that segfaults on input containing `%n`; every `sprintf` in the tree converted to `snprintf` with each buffer sized to its format's widest output |
+| **Memory safety** | Four stack buffer overflows reachable from input or the command line (Mace4's domain-size banner, long input filenames, `prooftrans -label`, and an unbounded `fscanf("%s")` in the proof reader); a heap buffer overflow on every `set(production)` run, which every production-mode example in the manual triggers; an uncontrolled format string that segfaults on input containing `%n`; every `sprintf` in the tree converted to `snprintf` with each buffer sized to its format's widest output |
 | **Undefined behaviour** | Signed integer overflow in Prover9's given-clause selection, hit on *every* default run; a second instance where the overflowed value is actually used; an out-of-range `double`→`int` conversion that silently defeated `sos_limit` |
 | **Hangs and crashes** | `prooftrans` and `directproof` looped forever, then dereferenced NULL, on a truncated proof |
 | **Usability** | `assign(max_minutes,-1)`, `assign(max_minutes,50000000)` and `assign(pick_given_ratio,-1)` all aborted the prover on legal input |
@@ -83,8 +83,11 @@ timings and memory figures normalised:
   `max_megs` ceiling falls on two large problems and adds a line to the memory
   report on three others.
 - An ASan + UndefinedBehaviorSanitizer build over all 168 files reports
-  **0 findings** for each program. The unfixed build reports undefined
-  behaviour on 135 of those 168 files.
+  **0 findings** for each program, where the unfixed build reports undefined
+  behaviour on 135 of them. Read the "Correction" row in `FIXES.md` before
+  relying on that: the first three sweeps had only 1 of 77 library objects
+  instrumented, so their ASan result meant far less than it appeared to, and
+  re-running them properly is what turned up M7.
 - Separately, 408 runs of `prooftrans`/`directproof` on deliberately malformed
   proof files, under the same sanitizers: 0 findings, against 96 for the
   unfixed build.

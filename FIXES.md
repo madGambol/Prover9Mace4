@@ -22,6 +22,7 @@ defaults to `-std=gnu23`.
 | M4 | Two more unbounded message buffers | `ladr/termorder.c`, `ladr/options.c` | hardening |
 | M5 | Stack buffer overflow from `prooftrans -label`; **aborts** | `apps.src/prooftrans.c:481` | memory safety |
 | M6 | All 30 remaining `sprintf` → `snprintf`, buffers sized to the widest output; exposed a too-small buffer in `interp.c` | whole tree | memory safety |
+| M7 | **Heap buffer overflow on every production-mode run** — `Op_codes` is sized before the symbols that index it are created | `ladr/dollar.c:68` | memory safety |
 | F1 | Input used as a `printf` format — **segfaults** | `ladr/fastparse.c:186` | memory safety |
 | F2 | Non-literal formats in the model printer | `mace4.src/print.c` | hardening |
 | D1 | Truncated proof ⇒ **infinite loop**, then NULL deref | `prooftrans.c:368`, `directproof.c:713` | hang / crash |
@@ -57,7 +58,9 @@ defect; see "Visible output change" under D1.
 | --- | --- |
 | Build with GCC 15, then `-Wextra -Wformat=2 -Wshadow` | 3 hard errors, 39 warnings → 23 (all remaining are benign unused-variable/debug-helper warnings) |
 | ASan + UBSan build, 168-file corpus (upstream manual + web examples) through `prover9` and `mace4` | 1 distinct UBSan finding (`giv_select`, hit by 135 of 168 files), 0 ASan findings; `mace4` entirely clean |
-| The same ASan + UBSan sweep re-run **after** the fixes, and again after the `snprintf` conversion | **0 findings** both times, over all 168 files for each program |
+| The same ASan + UBSan sweep re-run **after** the fixes, and again after the `snprintf` conversion | 0 findings both times — but see the correction below: **these three sweeps were only partly instrumented and their ASan result was not trustworthy** |
+| ⚠️ **Correction.** Auditing those sweeps found that only **1 of the 77 objects in `libladr.a`** carried ASan instrumentation; the sanitizer flags had reached `mace4.src` and `provers.src` but `make` had reused already-current library objects from an earlier ordinary build. ASan only checks accesses in code it instrumented, so almost every memory access in the library — `term.c`, `memory.c`, `parse.c`, `symbols.c`, `strbuf.c` and the rest — was unchecked. The `__asan_init` check that was supposed to validate the build is too weak: linking the ASan runtime says nothing about which *objects* were instrumented. | the earlier "0 ASan findings" was **substantially vacuous**; the UBSan result stands only for the directories that were instrumented |
+| Rebuilt from a clean tree with the sanitizer flags, verifying **77 of 77** `libladr.a` objects instrumented before trusting any result, then re-swept | finding **M7**, a heap buffer overflow in `ladr/dollar.c` reached by every production-mode example in the manual |
 | 350 rounds of mutational fuzzing of both parsers | 0 new memory errors — only the same `giv_select` overflow |
 | Targeted review of every `sprintf`, format-string, `strlen()` index, `double`→`int` conversion, and loop-variable reuse | findings M1–M4, F1–F2, D1, U3, S1 |
 | Line-by-line review of the committed diff, then malformed-input fuzzing of `prooftrans`/`directproof` (34 inputs × 2 tools × 6 formats = 408 runs under ASan+UBSan) | finding **D2**, which the corpus sweep could not reach: it drives only `prover9` and `mace4`, and the earlier targeted app checks used well-formed proofs |
@@ -237,6 +240,77 @@ converted every remaining `sprintf`.
 from it (`malloc`) rather than guessed, and written with `snprintf`.
 `set_string_attribute` interns a copy of the string, so the buffer is freed
 immediately afterwards.
+
+### M7 — heap buffer overflow in `$`-evaluation setup *(confirmed with ASan)*
+
+The oldest defect in this document, and the one that says the most about how it
+was found. `ladr/dollar.c:68` sizes an array from the symbol count, then fills
+it using calls that *add* to that count:
+
+```c
+Symbols_size = greatest_symnum() + 1;          /* a snapshot: 111 here */
+Op_codes = calloc(Symbols_size, sizeof(int));  /* 444 bytes */
+
+Op_codes[str_to_sn("+", 2)]   = SUM_OP;
+Op_codes[str_to_sn("mod", 2)] = MOD_OP;        /* ... 26 of these */
+```
+
+`greatest_symnum()` just returns `Symbol_count` (`ladr/symbols.c:705`), while
+`str_to_sn()` *interns* a symbol that is not already in the table, returning a
+symnum past the snapshot. Any of the 26 operator symbols that the input did not
+already mention is created right here, and its op code is written past the end
+of `Op_codes` — up to 26 `int`s, 104 bytes, beyond a 444-byte allocation.
+`Rules`, allocated from the same stale count a few lines later, is undersized
+for the same reason; it escapes only because every write to it is range-checked.
+
+The author knew about the hazard: lines 144, 169, 191, 372 and 424 of this same
+file all guard with `if (symnum >= Symbols_size)`. The initialisation block is
+the one place that does not.
+
+```
+ERROR: AddressSanitizer: heap-buffer-overflow
+WRITE of size 4 at 0x78e3f31e09fc
+    #0 init_dollar_eval ladr/dollar.c:75
+    #1 index_and_process_initial_clauses provers.src/search.c:2394
+    #2 search provers.src/search.c:2710
+0x78e3f31e09fc is located 0 bytes after 444-byte region
+```
+
+**Trigger:** `set(production)`, which implies `set(eval_rewrite)`, which is the
+only caller of `init_dollar_eval`. In the corpus that is `2inverter.in`,
+`cabbages.in`, `jugs.in`, `list.in` and `queens3.in` — **every production-mode
+example in the Prover9 manual**. It is present in pristine LADR-2009-11A and,
+independently confirmed, in the current LADR-2026 release.
+
+**Fix** — move the 26 `str_to_sn()` calls into a table, intern them all first,
+then take the symbol count and allocate both arrays from it:
+
+```c
+for (i = 0; i < NUM_DOLLAR_OPS; i++)
+  symnums[i] = str_to_sn(Dollar_ops[i].name, Dollar_ops[i].arity);
+
+Symbols_size = greatest_symnum() + 1;
+Op_codes = calloc(Symbols_size, sizeof(int));
+Rules = calloc(Symbols_size, sizeof(void *));
+...
+for (i = 0; i < NUM_DOLLAR_OPS; i++)
+  Op_codes[symnums[i]] = Dollar_ops[i].op_code;
+```
+
+**No change in results, and the reason matters.** The symbols that overflow are
+exactly the ones the input never mentions — every symbol that appears in the
+input is interned during parsing, before `init_dollar_eval` runs, so it already
+has a symnum below the snapshot. The out-of-bounds slots are therefore never
+read back: all five reads are range-guarded and reject them. Enlarging the
+arrays does make those guards accept symnums 111–136, but nothing in any input
+can refer to them. Checked empirically as well — `+`, `max`, `min`, `mod` and
+`abs` evaluate identically before and after.
+
+So this is a pure memory-corruption bug: it silently writes over whatever the
+allocator placed after `Op_codes`. That is also why it survived 17 years.
+Neither a plain build nor `MALLOC_CHECK_=3` reports anything on any of the five
+examples — verified — so only a sanitizer sees it. `test.src/regress.sh` tests
+it only when handed an instrumented build, and reports SKIP otherwise.
 
 ### M4 — two more fixed-size message buffers (hardening)
 `ladr/termorder.c:433` (`char mess[200]` + a symbol name),

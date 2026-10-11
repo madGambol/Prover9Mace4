@@ -8,10 +8,16 @@ B="${1:-$BASE/bin}"
 W=$(mktemp -d "${TMPDIR:-/tmp}/ladr-regress.XXXXXX")
 trap 'rm -rf "$W"' EXIT
 
-pass=0; fail=0
+pass=0; fail=0; skip=0
 chk() {
   if eval "$2" >/dev/null 2>&1; then printf "  PASS  %s\n" "$1"; pass=$((pass+1))
   else                               printf "  FAIL  %s\n" "$1"; fail=$((fail+1)); fi
+}
+# For defects that only a sanitizer can observe: a plain build cannot tell
+# whether they are present, so report SKIP rather than a meaningless PASS.
+chk_san() {
+  if nm -u "$B/prover9" 2>/dev/null | grep -q "__asan"; then chk "$1" "$2"
+  else printf "  SKIP  %s (needs a sanitizer build)\n" "$1"; skip=$((skip+1)); fi
 }
 
 LONG=$(printf 'z%.0s' $(seq 1 300))
@@ -82,6 +88,16 @@ chk "D2  prooftrans on an over-long clause id (overflow)" \
 chk "D2  directproof on an over-long clause id (overflow)" \
     'timeout 30 "$B/directproof" < "$W/longtok.txt" >/dev/null 2>&1; [ $? -eq 1 ]'
 
+# M7: dollar.c sized Op_codes from the symbol count, then filled it using
+# str_to_sn() calls that create symbols and so push the count past the end.
+# set(production) implies set(eval_rewrite), the only caller.  Nothing but a
+# sanitizer sees this -- a plain build and MALLOC_CHECK_=3 both run clean.
+printf 'set(production).\nassign(max_seconds,5).\nformulas(sos).\n  p(1 + 1).\n  q(max(3,5)).\nend_of_list.\n' \
+    > "$W/prod.in"
+chk_san "M7  production mode heap overflow in dollar.c" \
+    '! ASAN_OPTIONS=detect_leaks=0 timeout 60 "$B/prover9" -f "$W/prod.in" 2>&1 \
+       | grep -q "AddressSanitizer"'
+
 # N1/N2/N3: derived parm values that used to abort the program.
 chk "N1  assign(max_minutes,-1) accepted" \
     '! opt "assign(max_minutes,-1)." | grep -q "Fatal error"'
@@ -127,6 +143,10 @@ chk "X   prover9-mace4 races both and returns the winner" \
     'timeout 90 "$B/prover9-mace4" -f "$BASE/prover9.examples/x2.in" 2>/dev/null | grep -q "THEOREM PROVED"'
 
 echo
+if [ $skip -gt 0 ]; then
+  echo "($skip test(s) skipped: they need a build made with -fsanitize=address;"
+  echo " see 'Correction' in FIXES.md for why a plain build cannot see them.)"
+fi
 if [ $fail -eq 0 ]; then echo "ALL $pass REGRESSION TESTS PASSED"; else
   echo "$fail of $((pass+fail)) REGRESSION TESTS FAILED"; fi
 exit $(( fail != 0 ))
