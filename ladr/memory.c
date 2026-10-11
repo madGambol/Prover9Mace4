@@ -32,8 +32,13 @@ static int Malloc_calls = 0;   /* number of calls to malloc by palloc */
 
 static unsigned Bytes_palloced = 0;
 
-static void *Block = NULL;        /* location returned by most recent malloc */
-static void *Block_pos = NULL;    /* current position in block */
+/* These are char* rather than void* because palloc() does arithmetic on
+   them.  Arithmetic on void* is a GCC extension (it treats void as having
+   size 1), not standard C: a conforming compiler is entitled to reject
+   "Block_pos += n".  char* gives the same byte arithmetic portably. */
+
+static char *Block = NULL;        /* location returned by most recent malloc */
+static char *Block_pos = NULL;    /* current position in block */
 
 static unsigned Mem_calls = 0;
 static unsigned Mem_calls_overflows = 0;
@@ -55,7 +60,9 @@ void *palloc(size_t n)
     void *chunk;
     size_t malloc_bytes = MALLOC_MEGS*1024*1024;
 
-    if (Block==NULL || Block + malloc_bytes - Block_pos < n) {
+    /* The cast keeps this a size_t comparison; the difference is the number
+       of bytes left in the block, which cannot be negative here. */
+    if (Block==NULL || (size_t) (Block + malloc_bytes - Block_pos) < n) {
       /* First call or not enough in the current block, so get a new block. */
       if (n > malloc_bytes) {
 	printf("palloc, n=%d\n", (int) n);

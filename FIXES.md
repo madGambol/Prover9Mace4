@@ -35,6 +35,7 @@ defaults to `-std=gnu23`.
 | N3 | `assign(pick_given_ratio,-1)` **aborts the prover** | `ladr/options.c:713` | usability |
 | S1 | Spurious outer loop, correct only by accident | `mace4.src/print.c:107` | latent |
 | S2–S4 | `\|` for `\|\|`, `BOOL` holding a non-`BOOL` enum, pointer→`int` | `clash.c`, `paramod.c`, `flatdemod.c`, `avltree.c` | hygiene |
+| S5 | Arithmetic on `void *` in the allocator — a GCC extension, not standard C | `ladr/memory.c:58,78` | portability |
 | PF1 | `String_buf` append is O(n²) | `ladr/strbuf.c` | performance |
 | X1–X5 | All 4 installed helper scripts are unrunnable | `utilities/` | broken tooling |
 | L1 | `demod1` drops a term its callee may have freed | `ladr/demod.c:376` | latent, reported only |
@@ -59,8 +60,10 @@ defect; see "Visible output change" under D1.
 | Build with GCC 15, then `-Wextra -Wformat=2 -Wshadow` | 3 hard errors, 39 warnings → 23 (all remaining are benign unused-variable/debug-helper warnings) |
 | ASan + UBSan build, 168-file corpus (upstream manual + web examples) through `prover9` and `mace4` | 1 distinct UBSan finding (`giv_select`, hit by 135 of 168 files), 0 ASan findings; `mace4` entirely clean |
 | The same ASan + UBSan sweep re-run **after** the fixes, and again after the `snprintf` conversion | 0 findings both times — but see the correction below: **these three sweeps were only partly instrumented and their ASan result was not trustworthy** |
-| ⚠️ **Correction.** Auditing those sweeps found that only **1 of the 77 objects in `libladr.a`** carried ASan instrumentation; the sanitizer flags had reached `mace4.src` and `provers.src` but `make` had reused already-current library objects from an earlier ordinary build. ASan only checks accesses in code it instrumented, so almost every memory access in the library — `term.c`, `memory.c`, `parse.c`, `symbols.c`, `strbuf.c` and the rest — was unchecked. The `__asan_init` check that was supposed to validate the build is too weak: linking the ASan runtime says nothing about which *objects* were instrumented. | the earlier "0 ASan findings" was **substantially vacuous**; the UBSan result stands only for the directories that were instrumented |
-| Rebuilt from a clean tree with the sanitizer flags, verifying **77 of 77** `libladr.a` objects instrumented before trusting any result, then re-swept | finding **M7**, a heap buffer overflow in `ladr/dollar.c` reached by every production-mode example in the manual |
+| ⚠️ **Correction.** Auditing those sweeps found only **1 of the 77 objects in `libladr.a`** instrumented. Root cause, from the build logs: the sanitizer build compiled **60** files where a full build compiles **137**, and **none** of them were in `ladr/` — that tree had been created by copying an already-built tree, so `make` saw the library objects as current and never recompiled them with the flags. The missing 77 are exactly `libladr.a`. ASan only checks accesses in code it instrumented, so nearly every memory access in the library — `term.c`, `memory.c`, `parse.c`, `symbols.c`, `strbuf.c` and the rest — went unchecked. | the earlier "0 ASan findings" was **substantially vacuous**; the UBSan result stands only for `mace4.src` and `provers.src`, which were instrumented |
+| The check that was supposed to catch this — `nm` for `__asan_init` in the binary — is worthless for the purpose: linking the ASan runtime says nothing about which *objects* were instrumented. The positive control was equally misleading, because it used a `giv_select.c` defect, and `provers.src` was one of the directories that *did* get the flags. A control has to cover the code the claim is about. | lesson recorded rather than quietly fixed |
+| Rebuilt from `git archive` (sources only, no stale objects) plus `make clean`, then verified two ways before trusting any result: **137 of 137** compile lines carried `-fsanitize`, and **77 of 77** `libladr.a` objects reference `__asan` | finding **M7**, a heap buffer overflow in `ladr/dollar.c` reached by every production-mode example in the manual |
+| That corrected sweep, over the same 168 files per program, **before** the M7 fix | `prover9` **5 findings, all of them M7**; `mace4` **0 findings**; no UBSan findings. So the broken sweeps had concealed exactly one defect, not a collection |
 | 350 rounds of mutational fuzzing of both parsers | 0 new memory errors — only the same `giv_select` overflow |
 | Targeted review of every `sprintf`, format-string, `strlen()` index, `double`→`int` conversion, and loop-variable reuse | findings M1–M4, F1–F2, D1, U3, S1 |
 | Line-by-line review of the committed diff, then malformed-input fuzzing of `prooftrans`/`directproof` (34 inputs × 2 tools × 6 formats = 408 runs under ASan+UBSan) | finding **D2**, which the corpus sweep could not reach: it drives only `prover9` and `mace4`, and the earlier targeted app checks used well-formed proofs |
@@ -800,6 +803,32 @@ bits of a pointer on LP64. Only reachable from the `p_avl` debug helper.
 **Fix** — `%4p`.
 
 ---
+
+### S5 — arithmetic on `void *` in the allocator
+
+Every LADR allocation goes through `palloc()`, which carves chunks out of a
+malloc'd block using two `void *` cursors:
+
+```c
+static void *Block = NULL, *Block_pos = NULL;
+...
+if (Block==NULL || Block + malloc_bytes - Block_pos < n)   /* line 58 */
+...
+Block_pos += n;                                            /* line 78 */
+```
+
+Arithmetic on `void *` is a GCC extension — it treats `void` as having size 1
+— and not standard C; a conforming compiler may reject it, and MSVC does.
+Declaring the cursors `char *` gives identical byte arithmetic portably. The
+comparison on line 58 gets an explicit `(size_t)` cast so it stays an unsigned
+comparison now that the subtraction yields `ptrdiff_t`.
+
+Checked rather than assumed, in both directions: under `-std=c17 -pedantic`
+the old file emits three `-Wpointer-arith` diagnostics (lines 58 ×2 and 78) and
+the new one emits none, and a `-Wpointer-arith` sweep of `ladr`,
+`provers.src`, `mace4.src` and `apps.src` now reports **0** sites tree-wide.
+This one was pointed out by `jamiewannenburg/ladr`, which fixed it
+independently while porting LADR to MSVC.
 
 ## Performance
 
