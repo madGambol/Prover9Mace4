@@ -42,7 +42,8 @@ All fixed except **L1**, which is in a function with no callers anywhere in the
 tree and so cannot be validated; it is written up instead.
 
 New tests: `make -C test.src check` runs 26 regression tests (21 of which fail
-on pristine upstream), a `String_buf` unit test, and a Mace4 soundness check
+on the baseline — upstream with only the build fixes applied, since upstream
+alone does not compile), a `String_buf` unit test, and a Mace4 soundness check
 that independently verifies 271 reported models against their input clauses.
 
 One **intended output change** on ordinary input: `prooftrans` and
@@ -907,9 +908,9 @@ declines identically on both sides. The 2 differences are
 Both reach the same conclusion (`exit (max_megs)`) and neither finds a proof.
 
 **3. Mace4, output diff over Mace4-appropriate inputs.** The shipped
-`mace4.examples` / `apps.examples` plus the upstream `mace4-misc` set, each at
-domain sizes 2, 3 and 4 with `max_models=-1`, so every run enumerates the same
-finite space:
+`mace4.examples` / `apps.examples` plus the upstream `mace4-misc` set — 18
+problems — each at domain sizes 2, 3 and 4 with `max_models=-1`, so every run
+enumerates the same finite space. 18 × 3 = 54 runs:
 
 ```
 ## mace4: identical=49 differing=3 timeout=2   (ran-a-search=49, input-rejected=3)
