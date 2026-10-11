@@ -32,6 +32,19 @@ static int Transformations = 0;
 
 #define BUF_MAX 1000
 
+/* fscanf's "%s" has no inherent bound, so the format used below to read a
+   token (a "%" or a clause id) carries an explicit field width; without one,
+   a long run of non-whitespace in the input overruns the buffer.  The buffer
+   that receives the token is declared one byte larger than the width, which
+   leaves room for the NUL that fscanf writes and lets the width be derived
+   from BUF_MAX rather than being a second constant that could drift from it.
+   Truncating is safe here: a token this long cannot be a "%" or an integer
+   clause id, so the checks below reject it. */
+
+#define STRINGIFY_(x) #x
+#define STRINGIFY(x)  STRINGIFY_(x)
+#define TOKEN_FMT     "%" STRINGIFY(BUF_MAX) "s"
+
 /*************
  *
  *   read_heading()
@@ -697,11 +710,11 @@ int main(int argc, char **argv)
     /* ok, we have a proof */
     String_buf comment = get_string_buf();
 
-    char s[BUF_MAX];
+    char s[BUF_MAX+1];                 /* +1: TOKEN_FMT's width is BUF_MAX */
     Plist proof = NULL;
     number_of_proofs++;
 
-    rc = fscanf(fin, "%s", s);         /* "%" or clause id */
+    rc = fscanf(fin, TOKEN_FMT, s);    /* "%" or clause id */
     while (rc == 1 && str_ident(s, "%")) {
       if (fgets(s, BUF_MAX, fin) == NULL) {
 	rc = EOF;                      /* EOF in the middle of a comment */
@@ -721,7 +734,7 @@ int main(int argc, char **argv)
 	    break;
 	}
       }
-      rc = fscanf(fin, "%s", s);       /* "%" or clause id */
+      rc = fscanf(fin, TOKEN_FMT, s);  /* "%" or clause id */
     }
     if (rc != 1)
       fatal_error("proof ends prematurely (truncated input?)");
@@ -743,7 +756,7 @@ int main(int argc, char **argv)
 
       proof = plist_prepend(proof, cl);
 
-      rc = fscanf(fin, "%s", s);         /* clause id */
+      rc = fscanf(fin, TOKEN_FMT, s);    /* clause id */
       if (rc != 1)
 	fatal_error("proof ends prematurely (truncated input?)");
     }

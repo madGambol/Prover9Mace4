@@ -64,6 +64,24 @@ chk "D1  exactly one blank line after the proof comments" \
     'timeout 30 "$B/prooftrans" < "$W/proof.txt" 2>/dev/null \
        | awk "/^% Given clauses/{g=NR} g&&NR>g&&/^\$/{n++} g&&NR>g&&!/^\$/{exit} END{exit !(n==1)}"'
 
+# D2: fscanf("%s") carried no field width, so a token of unbounded length
+# from the input was read into char s[1000].  A proof whose clause id is a
+# long run of non-whitespace overflowed it (ASan: stack-buffer-overflow,
+# WRITE of size 5001 at prooftrans.c:379); at this length the plain build
+# segfaults.  Both tools must now reject the input cleanly instead.
+awk 'BEGIN{s="";while(length(s)<200000)s=s "xxxxxxxxxx";print substr(s,1,200000)}' \
+    > "$W/tok.txt"
+awk -v tokfile="$W/tok.txt" '
+  BEGIN{getline tok < tokfile}
+  /= PROOF =/{p=1}
+  p && !done && /^[0-9]+ /{sub(/^[0-9]+/, tok); done=1}
+  {print}' "$W/proof.txt" > "$W/longtok.txt"
+
+chk "D2  prooftrans on an over-long clause id (overflow)" \
+    'timeout 30 "$B/prooftrans" < "$W/longtok.txt" >/dev/null 2>&1; [ $? -eq 1 ]'
+chk "D2  directproof on an over-long clause id (overflow)" \
+    'timeout 30 "$B/directproof" < "$W/longtok.txt" >/dev/null 2>&1; [ $? -eq 1 ]'
+
 # N1/N2/N3: derived parm values that used to abort the program.
 chk "N1  assign(max_minutes,-1) accepted" \
     '! opt "assign(max_minutes,-1)." | grep -q "Fatal error"'

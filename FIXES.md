@@ -25,6 +25,7 @@ defaults to `-std=gnu23`.
 | F1 | Input used as a `printf` format — **segfaults** | `ladr/fastparse.c:186` | memory safety |
 | F2 | Non-literal formats in the model printer | `mace4.src/print.c` | hardening |
 | D1 | Truncated proof ⇒ **infinite loop**, then NULL deref | `prooftrans.c:368`, `directproof.c:713` | hang / crash |
+| D2 | Unbounded `fscanf("%s")` from untrusted input ⇒ **stack buffer overflow / segfault** | `prooftrans.c`, `directproof.c`, 3 sites each | memory safety |
 | U1 | Signed overflow on **every default prover9 run** | `provers.src/giv_select.c:152` | UB |
 | U2 | Same overflow where the value is actually used | `provers.src/giv_select.c:112` | wrong results |
 | U3 | `double`→`int` conversion defeats `sos_limit` | `provers.src/giv_select.c:462` | wrong results |
@@ -40,7 +41,7 @@ defaults to `-std=gnu23`.
 All fixed except **L1**, which is in a function with no callers anywhere in the
 tree and so cannot be validated; it is written up instead.
 
-New tests: `make -C test.src check` runs 24 regression tests (19 of which fail
+New tests: `make -C test.src check` runs 26 regression tests (21 of which fail
 on pristine upstream), a `String_buf` unit test, and a Mace4 soundness check
 that independently verifies 271 reported models against their input clauses.
 
@@ -58,6 +59,7 @@ defect; see "Visible output change" under D1.
 | The same ASan + UBSan sweep re-run **after** the fixes, and again after the `snprintf` conversion | **0 findings** both times, over all 168 files for each program |
 | 350 rounds of mutational fuzzing of both parsers | 0 new memory errors — only the same `giv_select` overflow |
 | Targeted review of every `sprintf`, format-string, `strlen()` index, `double`→`int` conversion, and loop-variable reuse | findings M1–M4, F1–F2, D1, U3, S1 |
+| Line-by-line review of the committed diff, then malformed-input fuzzing of `prooftrans`/`directproof` (34 inputs × 2 tools × 6 formats = 408 runs under ASan+UBSan) | finding **D2**, which the corpus sweep could not reach: it drives only `prover9` and `mace4`, and the earlier targeted app checks used well-formed proofs |
 | Exhaustive `sprintf` → `snprintf` conversion with each buffer sized to its format's widest output | finding M5 (missed on the first pass) and a too-small buffer in `interp.c` |
 | Rebuild with `-Wformat-truncation=2 -Wformat-overflow=2 -Wstringop-overflow=4` | **no truncation or overflow warnings**: every destination is provably large enough |
 | `make test1` / `test2` / `test3` | pass before and after |
@@ -432,6 +434,73 @@ proof (so 3 lines for the 3-proof input), and the `hints` and `ivy` formats of
 
 This did not show up in the original corpus A/B diff because that compared
 `prover9` and `mace4` only, not the apps built on top of them.
+
+### D2 — unbounded `fscanf("%s")` into a fixed buffer *(confirmed with ASan)*
+
+Found later than the rest, by reviewing the committed D1 diff line by line and
+then fuzzing the two tools with *malformed* proofs. It sits in the same loop as
+D1, in three places per file:
+
+```c
+char s[BUF_MAX];                      /* BUF_MAX is 1000 */
+...
+rc = fscanf(fin, "%s", s);            /* "%" or clause id */
+```
+
+`%s` has no inherent bound, so the length of the write is chosen by the input,
+not by the program. `prooftrans` and `directproof` read a proof from stdin or a
+named file, so this is attacker-controlled:
+
+```
+==3497123==ERROR: AddressSanitizer: stack-buffer-overflow
+WRITE of size 5001 at 0x77ca07e00438 thread T0
+    #2 __isoc23_fscanf
+    #3 main apps.src/prooftrans.c:379
+Address ... is located in stack of thread T0 at offset 1080 in frame
+    #0 main apps.src/prooftrans.c:214
+```
+
+The overflow begins at exactly 1000 characters (1000 bytes plus the NUL
+`fscanf` appends is one byte past `s`), and a 50 000-character token segfaults
+the ordinary non-instrumented build.
+
+**Fix** — give the conversion an explicit field width, derived from `BUF_MAX`
+by stringification so the two cannot drift apart, and declare the buffer one
+byte larger than the width to hold the NUL:
+
+```c
+#define STRINGIFY_(x) #x
+#define STRINGIFY(x)  STRINGIFY_(x)
+#define TOKEN_FMT     "%" STRINGIFY(BUF_MAX) "s"   /* -> "%1000s" */
+...
+char s[BUF_MAX+1];                 /* +1: TOKEN_FMT's width is BUF_MAX */
+rc = fscanf(fin, TOKEN_FMT, s);    /* "%" or clause id */
+```
+
+Truncating is safe at these three call sites: the token read is either `"%"` or
+an integer clause id, so anything approaching 1000 characters is malformed
+input, and the existing checks reject it. Over-long input now exits 1 with
+`Fatal error:  sread_term error` instead of smashing the stack.
+
+**Verification.** 34 malformed inputs (over-long tokens at 998/999/1000/1001/
+1002/5000 characters in each of four positions, plus truncations every 200
+bytes) × 2 tools × 6 output formats = 408 runs under ASan+UBSan: **0 findings,
+0 crashes**. The same 408 runs against the pre-fix build report **96**
+stack-buffer-overflows, so the harness demonstrably can fail. On well-formed
+input the fix changes nothing: 27/27 byte-identical across both tools, seven
+formats, and 1-proof/3-proof inputs.
+
+**Why the earlier sweeps missed it.** The ASan corpus sweep drives `prover9`
+and `mace4`, which do not use this code; the targeted `prooftrans`/
+`directproof` checks did exercise it, but only with well-formed proofs, and the
+parser fuzzing targeted the term parsers rather than the proof-file reader. The
+lesson is the one D1 already illustrated: an app reading its own output format
+still needs to be fuzzed with input that violates that format.
+
+Two further `scanf` sites were checked and left alone: `ladr/dioph.c` is inside
+`#ifdef SOLO` and reads `%d`, and `apps.src/old/modelformat.c` is not compiled.
+`bob/prooftrans.c` has the same three unfixed sites but is a stale duplicate
+that no Makefile references (see the note at the end of this document).
 
 ---
 
@@ -910,11 +979,13 @@ Mace4's model printer is clean at domain sizes 4, 10, 11 and 12 — the sizes
 either side of the `n <= 10` formatting switch in `print.c` that S1 and F2
 touched.
 
-**7. Regression suite.** `test.src/regress.sh` — 24 tests, all passing on the
-fixed tree, 19 of them failing on the baseline. The 5 that pass on both are the
+**7. Regression suite.** `test.src/regress.sh` — 26 tests, all passing on the
+fixed tree, 21 of them failing on the baseline. The 5 that pass on both are the
 deliberate "must not regress" controls (a complete proof still transforms
 correctly, in-range parm derivations still produce their old values, a default
-Prover9 run still finds its proof).
+Prover9 run still finds its proof). The two D2 tests were also run against a
+build that carries every fix *except* D2, where they are the only two failures —
+so they test what they claim to and nothing else.
 
 ### Fixes that intentionally *can* change results
 
