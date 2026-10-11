@@ -41,6 +41,7 @@ libmace libmace4:
 	$(MAKE) clean
 
 install:
+	/bin/mkdir -p ../bin
 	/bin/cp -p $(PROGRAMS) ../bin
 
 clean:

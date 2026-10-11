@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 
 import sys
 import re
@@ -9,7 +9,7 @@ entries = []
 entry = []
 
 for line in lines:
-	if re.match('\S', line) or re.search('------', line):
+	if re.match(r'\S', line) or re.search('------', line):
 		entries.append(entry)
 		entry = []
 	entry.append(line)

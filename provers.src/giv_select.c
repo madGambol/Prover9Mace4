@@ -20,6 +20,7 @@
 #include "semantics.h"
 #include "../ladr/avltree.h"
 #include "../ladr/clause_eval.h"
+#include <math.h>    /* trunc(), used when reporting iters-to-selection */
 
 /* Private definitions and types */
 
@@ -97,6 +98,25 @@ void free_giv_select(Giv_select p)
 
 /*************
  *
+ *   add_parts()
+ *
+ *************/
+
+/* A selector's "part" can be INT_MAX, which means "keep taking from this
+   selector as long as it has clauses" (see selector_rules_from_options:
+   input_sos_first and hints_part==INT_MAX both generate such a rule).
+   Sums of parts therefore have to saturate; plain addition overflows,
+   which is undefined behavior and wraps to a negative cycle size.
+   Both arguments are assumed to be nonnegative. */
+
+static
+int add_parts(int a, int b)
+{
+  return (a > INT_MAX - b ? INT_MAX : a + b);
+}  /* add_parts */
+
+/*************
+ *
  *   current_cycle_size()
  *
  *************/
@@ -109,7 +129,7 @@ int current_cycle_size(Select_state s)
   for (p = s->selectors; p; p = p->next) {
     Giv_select gs = p->v;
     if (avl_size(gs->idx) > 0)
-      sum += gs->part;
+      sum = add_parts(sum, gs->part);
   }
   return sum;
 }  /* current_cycle_size */
@@ -149,11 +169,11 @@ void init_giv_select(Plist rules)
     
     if (is_constant(ARG(ARG(t,0),1), "high")) {
       High.selectors = plist_append(High.selectors, gs);
-      High.cycle_size += n;
+      High.cycle_size = add_parts(High.cycle_size, n);
     }
     else {
       Low.selectors  = plist_append(Low.selectors,  gs);
-      Low.cycle_size += n;
+      Low.cycle_size = add_parts(Low.cycle_size, n);
     }
 
     gs->name = term_symbol(ARG(ARG(t,0),0));
@@ -438,17 +458,25 @@ BOOL sos_keep2(Topform c, Clist sos, Prover_options opt)
   if (sos_size < sos_limit / keep_factor)
     keep = TRUE;
   else {
-    int iters;
+    /* least_iters_to_selection() returns a double which can exceed INT_MAX;
+       converting that to int is undefined behavior (in practice it yields
+       INT_MIN, which makes the test below keep the clause instead of
+       deleting it, defeating sos_limit).  Compare as a double instead.
+       The two printf's below use trunc() so that they still show the same
+       digits the old (int) conversion did -- "%.0f" on its own would round
+       and change existing output. */
+    double iters;
     c->id = INT_MAX;
     iters = least_iters_to_selection(c, &Low, NULL);
     if (Debug)
-      printf("iters=%d, wt=%.3f\n", iters, c->weight);
+      printf("iters=%.0f, wt=%.3f\n", trunc(iters), c->weight);
     if (iters < sos_limit / keep_factor)
       keep = TRUE;
     else {
       if (c->weight < Low_water_keep) {
 	Low_water_keep = c->weight;
-	printf("\nLow Water (keep): wt=%.3f, iters=%d\n", c->weight, iters);
+	printf("\nLow Water (keep): wt=%.3f, iters=%.0f\n",
+	       c->weight, trunc(iters));
 	if (stringparm(opt->stats, "all"))
 	  selector_report();
 	fflush(stdout);

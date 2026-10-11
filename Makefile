@@ -2,6 +2,7 @@ help:
 	@echo See README.make
 
 all:
+	/bin/mkdir -p bin
 	cd ladr         && $(MAKE) lib
 	cd mace4.src    && $(MAKE) all
 	cd provers.src  && $(MAKE) all

@@ -1,0 +1,763 @@
+# Prover9 / Mace4 (LADR-2009-11A) — bug survey and fixes
+
+Upstream source: `LADR-2009-11A.tar.gz` (4 Nov 2009), the current release from
+<https://www.cs.unm.edu/~mccune/prover9/download/>, unpacked into this
+directory. `.src-download/` keeps the original tarball
+(sha256 `c32bed5807000c0b7161c276e50d9ca0af0cb248df2c1affb2f6fc02471b51d0`).
+
+Upstream's `README.make` says the build was tested with GCC 3.3.3 – 4.1.1.
+This tree was built and audited with **GCC 15.2.0 on x86-64 Linux**, which
+defaults to `-std=gnu23`.
+
+## Summary
+
+| # | What | Where | Severity |
+| --- | --- | --- | --- |
+| B1,B2 | K&R definitions rejected by C23 — **build fails** | `mace4.src/select.c`, `msearch.c` | blocker |
+| B3 | `-lm` before the objects; absent in two dirs — **link fails** | 3 Makefiles | blocker |
+| B4 | `make` renames the mace4 binary over a missing `bin/` | 4 Makefiles | blocker |
+| M1 | Stack buffer overflow, `mace4 -n 10000000` **aborts** | `mace4.src/msearch.c:891` | memory safety |
+| M2 | Stack buffer overflow on a long input filename | `ladr/top_input.c:892` | memory safety |
+| M3 | Same, in 4 more programs | `prooftrans`, `directproof`, `interpformat`, `tptp_to_ladr` | memory safety |
+| M4 | Two more unbounded message buffers | `ladr/termorder.c`, `ladr/options.c` | hardening |
+| F1 | Input used as a `printf` format — **segfaults** | `ladr/fastparse.c:186` | memory safety |
+| F2 | Non-literal formats in the model printer | `mace4.src/print.c` | hardening |
+| D1 | Truncated proof ⇒ **infinite loop**, then NULL deref | `prooftrans.c:368`, `directproof.c:713` | hang / crash |
+| U1 | Signed overflow on **every default prover9 run** | `provers.src/giv_select.c:152` | UB |
+| U2 | Same overflow where the value is actually used | `provers.src/giv_select.c:112` | wrong results |
+| U3 | `double`→`int` conversion defeats `sos_limit` | `provers.src/giv_select.c:462` | wrong results |
+| N1 | `assign(max_minutes,-1)` **aborts the prover** | `ladr/options.c:713` | usability |
+| N2 | Signed overflow in the parm multiplier | `ladr/options.c:713` | UB |
+| N3 | `assign(pick_given_ratio,-1)` **aborts the prover** | `ladr/options.c:713` | usability |
+| S1 | Spurious outer loop, correct only by accident | `mace4.src/print.c:107` | latent |
+| S2–S4 | `\|` for `\|\|`, `BOOL` holding a non-`BOOL` enum, pointer→`int` | `clash.c`, `paramod.c`, `flatdemod.c`, `avltree.c` | hygiene |
+| PF1 | `String_buf` append is O(n²) | `ladr/strbuf.c` | performance |
+| X1–X5 | All 4 installed helper scripts are unrunnable | `utilities/` | broken tooling |
+| L1 | `demod1` drops a term its callee may have freed | `ladr/demod.c:376` | latent, reported only |
+
+All fixed except **L1**, which is in a function with no callers anywhere in the
+tree and so cannot be validated; it is written up instead.
+
+New tests: `make -C test.src check` runs 22 regression tests (each fails on
+pristine upstream), a `String_buf` unit test, and a Mace4 soundness check that
+independently verifies 271 reported models against their input clauses.
+
+## How the survey was done
+
+| Method | Result |
+| --- | --- |
+| Build with GCC 15, then `-Wextra -Wformat=2 -Wshadow` | 3 hard errors, 39 warnings → 23 (all remaining are benign unused-variable/debug-helper warnings) |
+| ASan + UBSan build, 168-file corpus (upstream manual + web examples) through `prover9` and `mace4` | 1 distinct UBSan finding (`giv_select`, hit by 135 of 168 files), 0 ASan findings; `mace4` entirely clean |
+| The same ASan + UBSan sweep re-run **after** the fixes | **0 findings** |
+| 350 rounds of mutational fuzzing of both parsers | 0 new memory errors — only the same `giv_select` overflow |
+| Targeted review of every `sprintf`, format-string, `strlen()` index, `double`→`int` conversion, and loop-variable reuse | findings M1–M4, F1–F2, D1, U3, S1 |
+| `make test1` / `test2` / `test3` | pass before and after |
+| A/B diff of normalised output over the whole corpus, baseline vs fixed | see "Behaviour preservation" |
+
+The parser and the core term/clause machinery held up well: the fuzzing and
+the ASan corpus sweep found nothing in them. Every memory-safety bug below is
+in error-reporting or report-printing code, not in the inference engine.
+
+The 23 warnings that remain after the fixes were each checked and are benign:
+
+- `declare_base_symbols` (`symbols.c`), `complex4_p1` (`complex.c`) — return
+  values deliberately discarded; the calls are made for their side effects.
+- `transpose_binary` (`interp.c`) — ignores `str_to_int`'s status, but the
+  function is documented as requiring a well-formed interpretation.
+- `mindex_retrieve_next` (`mindex.c`) — a stale `Trail tr;` declaration; the
+  code uses `pos->tr`.
+- `factor2_instances` (`ivy.c`) — `l1i` is the literal the factoring step
+  *keeps* (only `l2i` is dropped), so computing it and not using it is correct.
+- `check_flat` / `check_flat2` (`discrimw.c`, `discrimb.c`) — debug helpers
+  kept for use under a debugger.
+- the loop counters and `props_attr` / `label_attr` — unused leftovers.
+
+`demod1` (`demod.c`) is the one that is *not* benign; it is written up as L1
+below.
+
+---
+
+## Build blockers (prevent compilation at all)
+
+### B1, B2 — K&R function definitions rejected by C23
+`mace4.src/select.c:236`, `mace4.src/msearch.c:850`
+
+```c
+int select_concentric_band(min_id, max_id, max_constrained)   /* no types */
+int next_domain_size(n)
+```
+
+Old-style definitions with implicit `int` parameters. GCC 14+ makes
+`-Wimplicit-int` an error by default, so the build stops here.
+
+**Fix** — give the parameters their types. No behavioural change: the
+implicit type was already `int`.
+
+### B3 — `-lm` before the object files, and missing entirely in two directories
+`provers.src/Makefile` (7 rules), `mace4.src/Makefile`, `apps.src/Makefile`
+
+```
+$(CC) $(CFLAGS) -lm -o prover9 prover9.o $(OBJECTS) ../ladr/libladr.a
+```
+
+A static library only satisfies references from objects listed *before* it, so
+`-lm` placed first is discarded:
+
+```
+search.c: undefined reference to `round'
+avltree.c: undefined reference to `ceil'
+```
+
+`mace4.src` and `apps.src` never linked `-lm` at all, even though
+`libladr.a(avltree.o)` calls `ceil`.
+
+**Fix** — `-lm` last on every link line, and added to the `mace4.src` and
+`apps.src` rules. (`test.src/Makefile` already had it right, which is how the
+inconsistency is visible.)
+
+### B4 — `make` destroys `bin/` when it does not exist
+`Makefile`, `mace4.src/Makefile`, `apps.src/Makefile`, `provers.src/Makefile`
+
+`mace4.src`'s install step is `/bin/mv mace4 ../bin`. With no `bin/` directory
+present, `mv` does not fail — it **renames the mace4 binary to a file called
+`bin`**, after which every later `cp ... ../bin` fails with
+`target '../bin': Not a directory`. A fresh checkout that does not carry an
+empty `bin/` cannot be built, and the failure message points nowhere near the
+cause.
+
+**Fix** — `/bin/mkdir -p ../bin` ahead of each install step, and `mkdir -p bin`
+in the top-level `all`.
+
+---
+
+## Memory-safety bugs
+
+### M1 — stack buffer overflow in Mace4's domain-size banner *(confirmed with ASan)*
+`mace4.src/msearch.c:891`
+
+```c
+char str[20];
+sprintf(str, "DOMAIN SIZE %d", n);
+```
+
+`"DOMAIN SIZE "` is 12 characters, so a 10-digit `n` needs 23 bytes. `n` is the
+domain size, settable straight from the command line, and the `sprintf` runs at
+the top of the loop before any search work:
+
+```
+$ mace4 -n 10000000 -f x.in                      # pristine, ASan build
+AddressSanitizer: stack-buffer-overflow ... WRITE of size 21
+  [32, 52) 'str' (line 891) <== overflows this variable
+  #3 mace4 mace4.src/msearch.c:892
+
+$ mace4 -n 10000000 -f x.in                      # pristine, ordinary build
+*** buffer overflow detected ***: terminated     # SIGABRT, rc=134
+
+$ mace4 -n 10000000 -f x.in                      # fixed
+============================== DOMAIN SIZE 10000000 ==================
+```
+
+Note the ordinary build: glibc's `_FORTIFY_SOURCE` checking, on by default on
+current distributions, turns this into a hard abort, so it is not a latent
+problem on a modern system.
+
+**Fix** — `char str[64]` and `snprintf`.
+
+### M2 — stack buffer overflow on a long input filename *(confirmed with ASan)*
+`ladr/top_input.c:892`
+
+```c
+char s[100];
+sprintf(s, "read_all_input, file %s not found", argv[i]);
+```
+
+The literal text is 31 characters, so any missing filename longer than 68
+characters overflows. `read_all_input` is the shared command-line entry point,
+so this reaches **prover9, mace4 and every app**:
+
+```
+$ prover9 -f zzzz...(200 chars)
+AddressSanitizer: stack-buffer-overflow ... WRITE of size 232
+  [176, 276) 's' (line 892) <== overflows this variable
+  #3 read_all_input ladr/top_input.c:893
+```
+
+**Fix** — `char s[1024]` and `snprintf`.
+
+### M3 — the same pattern in four more programs
+`apps.src/prooftrans.c:295`, `apps.src/directproof.c:668`,
+`apps.src/interpformat.c:217`, `provers.src/tptp_to_ladr.c:49`
+
+All four do `char s[100]; sprintf(s, "file %s not found", argv[...])`.
+Confirmed with ASan for `prooftrans` (232-byte write into `s[100]`); the others
+are the identical construct. `tptp_to_ladr`'s copy takes the filename from an
+`include()` directive **inside the input file** rather than from `argv`.
+
+**Fix** — `char s[1024]` and `snprintf` in all four.
+
+### M4 — two more fixed-size message buffers (hardening)
+`ladr/termorder.c:433` (`char mess[200]` + a symbol name),
+`ladr/options.c:239` (`char s[100]` + a flag name)
+
+Symbol and flag names are bounded by `MAX_NAME` (51), so neither overflows
+today. Converted to `snprintf` anyway so the bound is enforced locally rather
+than depending on a constant three files away.
+
+Also audited and found **safe**: `ladr/symbols.c` `next_skolem_symbol`
+(prefixes are the literals `"c"`/`"f"`), `fresh_symbol` / `gen_new_symbol`
+(explicit `MAX_NAME` guards), `ladr/random.c:92` (`symbol[MAX_NAME]`),
+`ladr/just.c:1050` (`char s[21]`, max 12 written), and the three
+`[strlen(x)-1]` indexings in `ladr/weight2.c`, `ladr/parse.c` and
+`provers.src/tptp_to_ladr.c` (each provably reached with length ≥ 1).
+
+---
+
+## Format-string bugs
+
+### F1 — input text used as a `printf` format
+`ladr/fastparse.c:186-187`
+
+```c
+fprintf(stderr, s);
+fprintf(stdout, s);
+```
+
+`s` is a line just read from the input file (`fast_read_term`), printed when a
+term is missing its terminating period. Any `%s`/`%d`/`%n` in the input is
+interpreted as a conversion specification — reading arbitrary stack as pointers.
+This is the classic uncontrolled-format-string defect, and it is a live crash,
+not a theoretical one:
+
+```
+$ printf 'f(%%s%%s%%s%%s%%s%%n,a)\n' > fmt.in
+
+$ unfast < fmt.in ; echo "rc=$?"          # pristine
+rc=139                                     # SIGSEGV, no output
+
+$ unfast < fmt.in ; echo "rc=$?"          # fixed
+f(%s%s%s%s%s%n,a)
+Fatal error:  fast_read_term, term ends before period.
+rc=1
+```
+
+**Fix** — `fprintf(stderr, "%s", s)`.
+
+### F2 — non-literal formats in Mace4's model printer (hardening)
+`mace4.src/print.c:114,119,137,145`
+
+`printf(s2)` / `printf(s3)` where `s2`/`s3` are the constants `"--"`, `"---"`,
+`" -"`, `"  -"`. Harmless today because none contains `%`, but it defeats
+`-Wformat-security` for the whole file.
+
+**Fix** — `printf("%s", s2)`.
+
+---
+
+## Hangs and crashes on truncated input
+
+### D1 — `prooftrans` and `directproof` spin forever on a truncated proof
+`apps.src/prooftrans.c:368`, `apps.src/directproof.c:713` — *three defects in
+one place*
+
+```c
+fgets(s, BUF_MAX, fin);
+...
+if (s[strlen(s)] != '\n') {       /* (a) */
+  char c;                         /* (b) */
+  do {
+    c = fgetc(fin);
+    sb_append_char(comment, c);
+  } while (c != '\n');
+}
+```
+
+- **(a)** `s[strlen(s)]` is by definition the NUL terminator, so the test is
+  `'\0' != '\n'` — **always true**. The intended test was `s[strlen(s)-1]`
+  ("did this line end with a newline, or was it truncated by `BUF_MAX`?").
+  Consequence: the drain loop runs after *every* `%` comment line and swallows
+  the following line into the comment text.
+- **(b)** `fgetc` returns `int`; storing it in a `char` loses the EOF
+  distinction. At end of file `c` becomes `(char)-1`, never `'\n'`, so the
+  `do/while` **never terminates**.
+- **(c)** The `fgets` return value is discarded, so EOF immediately after the
+  `%` token leaves `s` holding `"%"` and the enclosing
+  `while (str_ident(s, "%"))` spins as well.
+
+Reproduced by truncating any prover9 output right after a `%` comment line —
+both tools spin at 100 % CPU with memory climbing until killed:
+
+```
+t=3s  state=R RSS=2444kB utime=306ticks
+t=10s state=R RSS=2788kB utime=1007ticks
+t=25s state=R RSS=3204kB utime=2508ticks
+```
+
+Fixing just those three exposed **two further pre-existing defects** in the
+clause loop immediately below, which had been unreachable only because control
+never got there:
+
+- `read_term` returns `NULL` at EOF and the result goes straight into
+  `term_to_clause(clause_term)` → **segfault** (observed once (a)–(c) were
+  fixed).
+- `rc = fscanf(fin, "%s", s)` leaves `s` untouched at EOF, so if the
+  `"=========="` separator never arrives the loop spins — a second hang.
+
+**Fix** — test `s[strlen(s)-1]` with an empty-string guard; make `c` an `int`
+and stop at `EOF`; check the `fgets` and `fscanf` return values; reject a
+`NULL` term. Truncated input now ends with a clean diagnostic:
+
+```
+$ prooftrans < truncated-proof
+Fatal error:  proof ends prematurely (truncated input?)      [exit 1]
+```
+
+---
+
+## Undefined behaviour in Prover9's given-clause selection
+
+### U1 — signed integer overflow on **every default prover9 run**
+`provers.src/giv_select.c:152,156`
+
+```c
+High.cycle_size += n;
+```
+
+`input_sos_first` defaults to `TRUE`, and `selector_rules_from_options` emits
+its rule with `part = INT_MAX` (meaning "drain this selector first"). The next
+rule's `n` is then added to `INT_MAX`:
+
+```
+giv_select.c:152:23: runtime error: signed integer overflow:
+                     2147483647 + 1 cannot be represented in type 'int'
+  #0 init_giv_select  provers.src/giv_select.c:152
+  #1 init_search      provers.src/search.c:2144
+```
+
+This fired in **135 of the 168 corpus files** and in all 28 fuzzing findings —
+i.e. essentially every run that uses the default selection rules. The
+`cycle_size` field turns out to be **write-only** (nothing ever reads
+`High.cycle_size`/`Low.cycle_size`), so today the only consequence is the
+undefined behaviour itself; a `-ftrapv` or UBSan build aborts.
+
+### U2 — the same overflow where the value *is* used
+`provers.src/giv_select.c:105-115`
+
+```c
+int sum = 0;
+for (p = s->selectors; p; p = p->next)
+  if (avl_size(gs->idx) > 0)
+    sum += gs->part;              /* gs->part can be INT_MAX */
+```
+
+`current_cycle_size()` feeds `iterations_to_selection()` at lines 409 and 481.
+When an `INT_MAX`-part selector and any other selector in the same group both
+hold clauses, the sum wraps **negative**, `iterations_to_selection` returns a
+negative estimate, and `sos_keep2` / `worst_clause` then delete or displace the
+wrong clauses. Unlike U1, this changes search behaviour rather than only UB
+status.
+
+Two routes reach it:
+
+- the **High** group, where `input_sos_first` (default on) always contributes a
+  part of `INT_MAX`; `current_cycle_size(&High)` is reached through
+  `worst_clause`'s fallback to the High group;
+- the **Low** group, if `hints_part` is set explicitly to something large but
+  not exactly `INT_MAX` (`assign(hints_part, 2147483646)`), since that routes
+  the hints rule into Low with that part value.
+
+Both additionally need a search big enough to reach the `sos_limit` path, which
+is why the corpus exercised U1 on nearly every file but never U2.
+
+With the fix, a saturated `INT_MAX` cycle size is also the semantically right
+answer: when a selector with part `INT_MAX` holds clauses, nothing in the other
+selectors will ever be reached, so "effectively infinite iterations to
+selection" is correct — whereas the wrapped negative value claimed those
+clauses were about to be selected.
+
+**Fix for U1 and U2** — one saturating helper, since `INT_MAX` is being used as
+"infinity" and capping preserves exactly that meaning:
+
+```c
+static int add_parts(int a, int b)
+{
+  return (a > INT_MAX - b ? INT_MAX : a + b);
+}
+```
+
+### U3 — `double`→`int` conversion defeats `sos_limit`
+`provers.src/giv_select.c:460-462`
+
+```c
+int iters;
+iters = least_iters_to_selection(c, &Low, NULL);   /* returns double */
+...
+if (iters < sos_limit / keep_factor)
+  keep = TRUE;
+```
+
+`least_iters_to_selection` returns a `double` computed as
+`n * (cycle_size/part) / (occurrences/sos_size)`, which readily exceeds
+`INT_MAX`. Converting an out-of-range `double` to `int` is undefined behaviour;
+on x86 it yields `INT_MIN`, which makes the comparison true and **keeps a
+clause that should have been deleted** — silently disabling `sos_limit`
+(default 20000, active by default) exactly for the clauses it is meant to catch.
+
+**Fix** — keep `iters` a `double` and compare in `double`. The two `printf`s
+use `%.0f`, so output is unchanged for in-range values.
+
+---
+
+## Option-dependency defects (Prover9)
+
+These three were found while building a deterministic A/B harness: the obvious
+way to neutralise a problem's time limit, `assign(max_minutes, -1)`, kills
+prover9 outright. All three come from one line.
+
+`ladr/options.c:713`
+
+```c
+int dval = p->multiply ? p->val * val : p->val;
+...
+assign_parm(p->id, dval, echo);     /* range-checks dval and calls fatal_error */
+```
+
+A parm can *derive* another parm's value (`search.c:282-284`,
+`search.c:302-306`); `max_minutes` sets `max_seconds` with multiplier 60,
+`max_hours` with 3600, `max_days` with 86400, and `pick_given_ratio` sets
+`weight_part` with multiplier 1. The derived value is then pushed through the
+normal range check, which calls `fatal_error` on failure — so a *derived*
+value that lands out of range aborts the program.
+
+### N1 — `-1` ("no limit") aborts the prover
+`-1` is the documented no-limit value for `max_minutes`/`max_hours`/`max_days`
+(it is also their default), but scaling it produces a value below
+`max_seconds`'s minimum of `-1`:
+
+```
+$ prover9 -f <(echo 'assign(max_minutes,-1).') -f problem.in
+assign_parm: parm max_seconds, value -60 out of range [-1..2147483647].
+Fatal error:  assign_parm
+```
+
+`max_hours` gives `-3600`, `max_days` gives `-86400`. All three abort.
+
+### N2 — signed overflow in the multiplier
+`p->val * val` is plain `int` arithmetic:
+
+| assigned | derived `max_seconds` |
+| --- | --- |
+| `assign(max_minutes, 50000000)` | `-1294967296` |
+| `assign(max_hours, 1000000)` | `-694967296` |
+
+Undefined behaviour, and the wrapped negative then aborts on the range check.
+
+### N3 — a sentinel derived into a narrower range aborts
+`pick_given_ratio` has minimum `-1`, but the `weight_part` it derives has
+minimum `0`:
+
+```
+$ prover9 -f <(echo 'assign(pick_given_ratio,-1).') -f problem.in
+assign_parm: parm weight_part, value -1 out of range [0..2147483647].
+Fatal error:  assign_parm
+```
+
+**Fix for N1–N3** — one change: leave a negative sentinel unscaled, saturate
+instead of overflowing, and clamp the derived value into the dependent parm's
+range rather than aborting. A value the user assigns *directly* is still
+range-checked and still errors, as before — only derived values are clamped.
+
+| input | before | after |
+| --- | --- | --- |
+| `max_minutes, -1` | fatal | `max_seconds = -1` |
+| `max_hours, -1` | fatal | `max_seconds = -1` |
+| `max_days, -1` | fatal | `max_seconds = -1` |
+| `max_minutes, 50000000` | fatal (overflow) | `max_seconds = INT_MAX` |
+| `max_hours, 1000000` | fatal (overflow) | `max_seconds = INT_MAX` |
+| `pick_given_ratio, -1` | fatal | `weight_part = 0` |
+| `max_minutes, 2` | `max_seconds = 120` | `max_seconds = 120` |
+| `max_hours, 3` | `max_seconds = 10800` | `max_seconds = 10800` |
+| `pick_given_ratio, 4` | `weight_part = 4` | `weight_part = 4` |
+
+The last three show that in-range derivations are untouched. Mace4 has no
+`max_minutes`/`max_hours`/`max_days`, so it is unaffected.
+
+## Logic defects that currently work only by accident
+
+### S1 — spurious outer loop in Mace4's unary-function printer
+`mace4.src/print.c:107`
+
+```c
+int i;
+for (i = 0; i < n; i++) {        /* outer loop */
+  printf("\n %s :\n", name);
+  for (i = 0; i < n; i++)        /* reuses i */
+    printf(s1, i);
+  ...
+}
+```
+
+Three inner loops reuse the outer loop's counter and leave it at `n`, so the
+outer body executes exactly once — which is what the output needs. The printed
+table is correct *only* because of the clobbering; tidying the shadowing
+without noticing the outer loop would print the table `n` times.
+
+**Fix** — delete the outer loop, matching the `arity == 2` branch below it.
+Byte-identical output (domain size is always ≥ 2).
+
+### S2 — bitwise `|` where `||` was intended
+`ladr/clash.c:283`, `ladr/paramod.c:347`
+
+```c
+else if (!p->clashable | p->clashed)
+if ((!VARIABLE(into) | Para_into_vars) && basic_check(into))
+```
+
+`!x` yields 0 or 1 and the right operands are booleans, so the truth value is
+the same and there are no side effects to short-circuit — no behavioural bug,
+but it is what `-Wparentheses` is warning about.
+
+**Fix** — `||`.
+
+### S3 — `BOOL` holding a non-`BOOL` enum
+`ladr/flatdemod.c:105`
+
+```c
+BOOL status = GO;      /* BOOL is enum {FALSE=0,TRUE=1}; GO is from enum {GO,BACKTRACK} */
+```
+
+Works only because `GO`/`BACKTRACK` happen to be 0/1, the same values as
+`FALSE`/`TRUE`. **Fix** — declare `status` as `int`.
+
+### S4 — pointer truncated to `int` in a debug printer
+`ladr/avltree.c:658` — `printf("%4d\n", (int) p->item)` discards the top 32
+bits of a pointer on LP64. Only reachable from the `p_avl` debug helper.
+**Fix** — `%4p`.
+
+---
+
+## Performance
+
+### PF1 — `String_buf` appending is quadratic
+`ladr/strbuf.c`
+
+`sb_append_char` walked the entire chunk list **on every character** to find
+the tail, so building an *n*-character buffer cost O(n²); `sb_append` did the
+same walk per call. `sb_cat_copy` indexed its source with `sb_char(sb2, i)`,
+which also rescans per character — the author's own comment there reads
+`/* Note that this is inefficient if there are many chunks in either sb. */`.
+This is on the proof-output and comment-handling paths.
+
+**Fix** — cache the tail chunk in `struct string_buf` (the struct is private to
+`strbuf.c`, and `get_cmem` zeroes it, so the new field needs no explicit
+initialisation), and walk the chunks directly in `sb_cat_copy`, still stopping
+at an embedded NUL as the original did.
+
+Measured with `test.src/strbuf_test.c` (new, run with `make -C test.src check`),
+400 000 `sb_append_char` calls:
+
+| | time |
+| --- | --- |
+| before | 3.29 s |
+| after | 0.00 s |
+
+All 14 semantic assertions in that test pass identically before and after.
+
+The one cost: the extra pointer grows `struct string_buf` from 16 to 24 bytes.
+That shows up in Prover9's memory-usage report as `string_buf ( 24)` instead of
+`string_buf ( 16)`, and it is the reason for the only output differences the
+corpus A/B diff turned up (see below).
+
+---
+
+## The installed helper scripts (`utilities/` → `bin/`)
+
+`make all` finishes with `/bin/cp -p utilities/* bin`, so these ship as
+user-facing commands. Every one of them was broken on this machine.
+
+### X1 — `#!/usr/bin/python` no longer exists
+`utilities/attack`, `utilities/looper`, `utilities/gvizify`,
+`utilities/prover9-mace4`, `rev.py`
+
+Current distributions ship no `/usr/bin/python` at all (only `python3`), so all
+five fail immediately with "no such file or directory" regardless of their
+contents. **Fix** — `#!/usr/bin/env python3`.
+
+### X2 — Python 2 `print` statements
+`utilities/attack`, `utilities/looper`, `utilities/gvizify`
+
+Even with a working interpreter, three of them are Python 2 and die at parse
+time:
+
+```
+  File "utilities/attack", line 36
+    print "Starting job:", command_and_args
+SyntaxError: Missing parentheses in call to 'print'. Did you mean print(...)?
+```
+
+**Fix** — converted the 20 `print` statements to `print()` calls. All were the
+plain `print EXPR` form (no trailing comma, no `print >>f`), so the conversion
+is mechanical and output-preserving.
+
+### X3 — `subprocess` pipes are bytes in Python 3
+`utilities/attack:39`, `utilities/looper:36`
+
+```c
+p1 = Popen(command_and_args, stdin=PIPE, stdout=PIPE, stderr=PIPE)
+(out, err) = p1.communicate(stdin_string)     /* stdin_string is a str */
+```
+
+Under Python 3 this raises `TypeError: memoryview: a bytes-like object is
+required`, and the `re` matching both scripts then do on `out` would fail too.
+**Fix** — `text=True` on the `Popen`, which keeps `communicate(str)` and all
+the downstream string handling working.
+
+### X4 — invalid regex escapes
+`utilities/attack:87` (`'\s*%'`), `rev.py:12` (`'\S'`)
+
+`SyntaxWarning: invalid escape sequence` today, a hard error in a future
+Python. **Fix** — raw strings.
+
+### X5 — `gvizify` is shipped without the execute bit
+`utilities/gvizify`
+
+It is mode `100644` in the tarball while every other script is `100755`, so
+after installation it cannot be run as a command:
+
+```
+$ gvizify proof.xml
+bash: .../bin/gvizify: Permission denied
+```
+
+**Fix** — `chmod +x`. (`utilities/proof3fo.xsl` is correctly non-executable; it
+is data, not a script.)
+
+All four utilities were then run end to end against freshly built binaries:
+`looper mace4 assumptions` and `looper prover9 goals` drive searches and report
+results, `attack` filters candidates and writes its interpretation file,
+`gvizify` turns `prooftrans xml` output into valid graphviz `dot`, and
+`prover9-mace4 -f file` races the two provers and returns the winner's output.
+
+### Known limitation, deliberately left alone
+`utilities/prover9-mace4` reports failure as soon as the *first* of the two
+processes exits, even when that one failed and the other would have succeeded:
+
+```
+$ prover9-mace4 -f satisfiable.in
+failure, Prover9 ended by sos empty       # Mace4 was about to find the model
+```
+
+The script's own header documents this ("the one that finishes first might have
+failed ... We'll miss the solution in that case") and adds "This script might
+not be very useful". That is a design decision by the author rather than a
+defect, so it is reported, not changed. The fix, if wanted, is to keep waiting
+on the other process when the first one exits without success.
+
+## Latent defect left documented but unfixed
+
+### L1 — `demod1` discards a term that `demod1_recurse` may have freed
+`ladr/demod.c:376-384`
+
+```c
+Term result;
+result = demod1_recurse(lit->atom, lit->atom, demodulator, direction,
+                        ipos, lex_order_vars);
+```
+
+`demod1_recurse` can `zap_term(t)` and return a replacement (lines 344-345);
+every recursive call therefore assigns the result back (`ARG(t,i) = ...`).
+`demod1` does not, so a rewrite at the top of the atom would leave `lit->atom`
+dangling and leak the contractum. The function's own documentation says it
+should "return the rewritten term", and it returns `void`.
+
+`demod1` has **no callers anywhere in the tree** — it is dead code exported in
+`demod.h`. Changing it would alter the behaviour of an untested function with no
+way to validate the result, so it is reported rather than patched. The fix, if
+it is ever called, is `lit->atom = demod1_recurse(...)`.
+
+---
+
+## Behaviour preservation
+
+The important question for a theorem prover is whether the fixes changed any
+*answers*. They did not. Verification, all against a **baseline** built from
+pristine upstream plus only the build fixes B1–B3 (so the baseline compiles but
+is otherwise untouched):
+
+**1. Upstream's own smoke tests** — `make test1` / `test2` / `test3` pass before
+and after.
+
+**2. Prover9, output diff over the whole corpus.** 168 inputs, run through both
+binaries, with timings, PIDs, dates, host names and memory figures normalised
+away. Searches were bounded by `max_given=300` rather than by wall-clock time,
+because a time-bounded run does a different amount of work on every invocation
+and would make the diff meaningless:
+
+```
+## prover9: identical=165 differing=2 timeout=1   (ran-a-search=135, input-rejected=32)
+```
+
+The 32 "input-rejected" files are Mace4 puzzles and data files that Prover9
+declines identically on both sides. The 2 differences are
+`fof/ALG033+1.in` and `fof/ALG043+1.in`, both of which terminate by exhausting
+`max_megs`; they differ only in *where* the 400 MB ceiling falls, because
+`struct string_buf` is 8 bytes larger after PF1:
+
+```
+< string_buf (  16)          4903       4903          0
+> string_buf (  24)          4903       4903          0
+< formula (  48)         10475685    6983463    3492222
+> formula (  48)         10474839    6982899    3491940
+```
+
+Both reach the same conclusion (`exit (max_megs)`) and neither finds a proof.
+
+**3. Mace4, output diff over Mace4-appropriate inputs.** The shipped
+`mace4.examples` / `apps.examples` plus the upstream `mace4-misc` set, each at
+domain sizes 2, 3 and 4 with `max_models=-1`, so every run enumerates the same
+finite space:
+
+```
+## mace4: identical=49 differing=3 timeout=2   (ran-a-search=49, input-rejected=3)
+```
+
+The 3 differences are all `mace4.examples/group2.in` — the only input in the
+set that both reaches and prints the `set(verbose)` memory report — and consist
+solely of the same `string_buf ( 16)` → `( 24)` line plus the extra 24-byte
+free-list bucket that the larger struct adds to the report. Every model table
+and count is identical. The 2 timeouts are `steam.in` on both sides.
+
+**4. Mace4 soundness.** `test.src/mace4_soundness.sh` has Mace4 enumerate all
+models of four problems (quasigroups, groups, a strict partial order, and a
+mixed function/predicate problem) at domain sizes 2–4, then has `clausetester`
+independently evaluate every input clause in every model:
+
+```
+SOUNDNESS OK: 271 models verified, every one satisfies every input clause
+```
+
+Baseline and fixed produce **the same 271 models**, with identical per-size
+counts.
+
+**5. Regression suite.** `test.src/regress.sh` — 22 tests, all passing on the
+fixed tree, 17 of them failing on the baseline. The 5 that pass on both are the
+deliberate "must not regress" controls (a complete proof still transforms
+correctly, in-range parm derivations still produce their old values, a default
+Prover9 run still finds its proof).
+
+### Fixes that intentionally *can* change results
+
+Only where the old code's behaviour was undefined or absent:
+
+- **U2** — a wrapped-negative cycle size produced wrong clause-retention
+  decisions; it now saturates.
+- **U3** — `sos_limit` now actually deletes the clauses it was meant to, instead
+  of keeping them because a `double`→`int` conversion overflowed to `INT_MIN`.
+- **N1–N3** — option assignments that previously aborted the program now take
+  effect.
+- **D1** — truncated proof input now reports an error instead of hanging and
+  then crashing.
+- **PF1** — 8 bytes more per `String_buf`, visible only in the memory report and
+  at a `max_megs` boundary, as item 2 above shows.
+
+Everything else is a build fix, a buffer-size change on an error-reporting
+path, or a semantics-preserving rewrite.

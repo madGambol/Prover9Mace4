@@ -104,24 +104,26 @@ void p_model(BOOL print_head)
 	char *s2 = n <= 10 ? "--"  : "---";
 	char *s3 = n <= 10 ? " -"  : "  -";
 	int i;
+	/* There used to be an outer "for (i = 0; i < n; i++)" loop around
+	   all of this.  It ran exactly once only because the inner loops
+	   below reuse i and leave it at n; removing it keeps the output the
+	   same and makes this match the arity-2 case. */
+	printf("\n %s :\n", name);
+	printf("       ");
+	for (i = 0; i < n; i++)
+	  printf(s1, i);
+	printf("\n    ---");
+	for (i = 0; i < n; i++)
+	  printf("%s", s2);
+	printf("\n       ");
 	for (i = 0; i < n; i++) {
-	  printf("\n %s :\n", name);
-	  printf("       ");
-	  for (i = 0; i < n; i++)
-	    printf(s1, i);
-	  printf("\n    ---");
-	  for (i = 0; i < n; i++)
-	    printf(s2);
-	  printf("\n       ");
-	  for (i = 0; i < n; i++) {
-	    int v = f1_val(p->base, i);
-	    if (v < 0)
-	      printf(s3);
-	    else
-	      printf(s1, v);
-	  }
-	  printf("\n");	  
+	  int v = f1_val(p->base, i);
+	  if (v < 0)
+	    printf("%s", s3);
+	  else
+	    printf(s1, v);
 	}
+	printf("\n");
       }
       else if (p->arity == 2) {
 	char *s1 = n <= 10 ? "%2d" : "%3d";
@@ -134,7 +136,7 @@ void p_model(BOOL print_head)
 	  printf(s1, i);
 	printf("\n    --+");
 	for (i = 0; i < n; i++)
-	  printf(s2);
+	  printf("%s", s2);
 	printf("\n");
 
 	for (i = 0; i < n; i++) {
@@ -142,7 +144,7 @@ void p_model(BOOL print_head)
 	  for (j = 0; j < n; j++) {
 	    int v = f2_val(p->base, i, j);
 	    if (v < 0)
-	      printf(s3);
+	      printf("%s", s3);
 	    else
 	      printf(s1, v);
 	  }

@@ -430,8 +430,9 @@ void init_kbo_weights(Plist weights)
 	  char *str = sn_to_str(SYMNUM(a));
 	  int symnum = function_or_relation_sn(str);
 	  if (symnum == -1) {
-	    char mess[200];
-	    sprintf(mess, "init_kbo_weights, symbol %s not found", str);
+	    char mess[256];
+	    snprintf(mess, sizeof(mess),
+		     "init_kbo_weights, symbol %s not found", str);
 	    fatal_error(mess);
 	  }
 	  set_kb_weight(symnum, wt);

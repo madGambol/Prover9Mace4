@@ -24,6 +24,7 @@
 
 struct string_buf {
   struct chunk *first;
+  struct chunk *last;   /* so that appending does not rescan the chunk list */
   int size;
 };
 
@@ -239,10 +240,7 @@ void sb_append(String_buf sb, char *s)
 {
   int i;
   int n = sb->size;
-  Chunk last = sb->first;
-
-  while (last != NULL && last->next != NULL)
-    last = last->next;
+  Chunk last = sb->last;
 
   for (i = 0; s[i] != '\0'; i++) {
     if (n % CHUNK_SIZE == 0) {
@@ -257,6 +255,7 @@ void sb_append(String_buf sb, char *s)
     n++;
   }
   sb->size = n;
+  sb->last = last;
 }  /* sb_append */
 
 /*************
@@ -279,10 +278,7 @@ void sb_append_char(String_buf sb, char c)
   */
 
   int n = sb->size;
-  Chunk last = sb->first;
-
-  while (last != NULL && last->next != NULL)
-    last = last->next;
+  Chunk last = sb->last;
 
   if (n % CHUNK_SIZE == 0) {
     Chunk new = get_chunk();
@@ -295,6 +291,7 @@ void sb_append_char(String_buf sb, char c)
   last->s[n % CHUNK_SIZE] = c;
   n++;
   sb->size = n;
+  sb->last = last;
 }  /* sb_append_char */
 
 /*************
@@ -362,12 +359,22 @@ You can use sb_cat() instead if you won't be needing sb2.
 /* PUBLIC */
 void sb_cat_copy(String_buf sb1, String_buf sb2)
 {
-  /* Note that this is inefficient if there are many chunks in either sb. */
-  int i;
-  char c;
+  /* Walk sb2's chunks directly.  The previous version indexed sb2 with
+     sb_char(sb2,i), which rescans the chunk list on every character, so
+     concatenating was quadratic in the size of sb2.  As before, copying
+     stops at the end of sb2 or at the first NUL character in it,
+     whichever comes first. */
+  Chunk h;
+  int i = 0;
 
-  for (i = 0; (c = sb_char(sb2, i)); i++)
-    sb_append_char(sb1, c);
+  for (h = sb2->first; h != NULL && i < sb2->size; h = h->next) {
+    int j;
+    for (j = 0; j < CHUNK_SIZE && i < sb2->size; j++, i++) {
+      if (h->s[j] == '\0')
+	return;
+      sb_append_char(sb1, h->s[j]);
+    }
+  }
 }  /* sb_cat_copy */
 
 /*************

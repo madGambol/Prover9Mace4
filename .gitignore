@@ -1,5 +1,18 @@
 *.o
 *.a
-bin/*
-!bin/.gitkeep
-.src-download/
+/bin/*
+!/bin/.gitkeep
+/.src-download/
+# Compiled programs. Upstream's tarball shipped some of these in the source
+# directories; make rebuilds them in place, so they only create diff noise.
+/provers.src/prover9
+/provers.src/fof-prover9
+/provers.src/autosketches4
+/provers.src/newauto
+/provers.src/newsax
+/provers.src/ladr_to_tptp
+/provers.src/tptp_to_ladr
+/mace4.src/mace4
+/test.src/avltest
+/test.src/tptp_test
+/test.src/strbuf_test

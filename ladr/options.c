@@ -236,8 +236,8 @@ int init_flag(char *name,
   if (Next_flag == MAX_FLAGS)
     fatal_error("init_flag, too many flags");
   else if (FALSE && str_to_flag_id(name) != -1) {
-    char s[100];
-    sprintf(s, "init_flag, flag %s already exists", name);
+    char s[256];
+    snprintf(s, sizeof(s), "init_flag, flag %s already exists", name);
     fatal_error(s);
   }
   else {
@@ -710,7 +710,31 @@ void assign_parm(int id, int val, BOOL echo)
       for (p = Parms[id].dependencies; p; p = p->next) {
 	if (p->type == PARMT) {
 	  /* parm -> parm */
-	  int dval = p->multiply ? p->val * val : p->val;
+	  /* A derived value must not be allowed to abort the program.
+	     Three things used to go wrong here:
+	       assign(max_minutes,-1) scaled the "no limit" sentinel to
+		 max_seconds=-60, out of range [-1..INT_MAX] -> fatal;
+	       assign(max_minutes,50000000) overflowed 60*val (signed
+		 overflow, seen as max_seconds=-1294967296);
+	       assign(pick_given_ratio,-1) derived weight_part=-1, out
+		 of range [0..INT_MAX] -> fatal.
+	     So: leave a negative sentinel unscaled, saturate instead of
+	     overflowing, and clamp into the dependent parm's range.
+	     A value the user assigns directly is still range-checked
+	     above; only derived values are clamped. */
+	  int dval;
+	  if (!p->multiply)
+	    dval = p->val;
+	  else if (val < 0)
+	    dval = val;
+	  else if (p->val > 0 && val > INT_MAX / p->val)
+	    dval = INT_MAX;
+	  else
+	    dval = p->val * val;
+	  if (dval < Parms[p->id].min)
+	    dval = Parms[p->id].min;
+	  else if (dval > Parms[p->id].max)
+	    dval = Parms[p->id].max;
 	  if (echo) {
 	    fprintf(stdout, "    %% assign(%s, %d) -> assign(%s, %d).\n",
 		    Parms[id].name,

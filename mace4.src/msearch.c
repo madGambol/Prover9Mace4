@@ -888,8 +888,8 @@ Mace_results mace4(Plist clauses, Mace_options opt)
   rc = SEARCH_GO_NO_MODELS;
 
   while (n >= 2 && (rc == SEARCH_GO_NO_MODELS || rc == SEARCH_GO_MODELS)) {
-    char str[20];
-    sprintf(str, "DOMAIN SIZE %d", n);
+    char str[64];
+    snprintf(str, sizeof(str), "DOMAIN SIZE %d", n);
     print_separator(stdout, str, TRUE);
     fflush(stdout);
     fprintf(stderr,"\n=== Mace4 starting on domain size %d. ===\n",n);

@@ -46,8 +46,8 @@ void read_tptp_input(FILE *fin, FILE *fout, FILE *ferr,
       }
       fin2 = fopen(fname2, "r");
       if (fin2 == NULL) {
-	char s[100];
-	sprintf(s, "read_tptp_input, file %s not found", fname2);
+	char s[1024];
+	snprintf(s, sizeof(s), "read_tptp_input, file %s not found", fname2);
 	fatal_error(s);
       }
       fprintf(fout, "\n%% Including file %s\n\n", fname2);

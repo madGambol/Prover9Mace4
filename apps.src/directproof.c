@@ -665,8 +665,8 @@ int main(int argc, char **argv)
     filename = argv[n+1];
     fin = fopen(filename, "r");
     if (fin == NULL) {
-      char s[100];
-      sprintf(s, "file %s not found", argv[n+1]);
+      char s[1024];
+      snprintf(s, sizeof(s), "file %s not found", argv[n+1]);
       fatal_error(s);
     }
   }
@@ -702,29 +702,38 @@ int main(int argc, char **argv)
     number_of_proofs++;
 
     rc = fscanf(fin, "%s", s);         /* "%" or clause id */
-    while (str_ident(s, "%")) {
-      fgets(s, BUF_MAX, fin);
+    while (rc == 1 && str_ident(s, "%")) {
+      if (fgets(s, BUF_MAX, fin) == NULL) {
+	rc = EOF;                      /* EOF in the middle of a comment */
+	break;
+      }
       /* in case prooftrans is run multiple times */
       if (!substring("Comments from original proof", s)) {
 	sb_append(comment, "%");
 	sb_append(comment, s);
       }
       /* in case there are any long comment lines (answers) */
-      if (s[strlen(s)] != '\n') {
-	char c;
-	do {
-	  c = fgetc(fin);
+      if (s[0] == '\0' || s[strlen(s)-1] != '\n') {
+	int c;                         /* must be int so that EOF is distinct */
+	while ((c = fgetc(fin)) != EOF) {
 	  sb_append_char(comment, c);
-	} while (c != '\n');
+	  if (c == '\n')
+	    break;
+	}
       }
       rc = fscanf(fin, "%s", s);       /* "%" or clause id */
     }
+    if (rc != 1)
+      fatal_error("proof ends prematurely (truncated input?)");
 
     while (!substring("==========", s)) {  /* separator at end of proof */
       Term clause_term = read_term(fin, stderr);
       Term just_term = read_term(fin, stderr);
       int id;
-      Topform cl = term_to_clause(clause_term);
+      Topform cl;
+      if (clause_term == NULL || just_term == NULL)
+	fatal_error("proof ends prematurely (truncated input?)");
+      cl = term_to_clause(clause_term);
       clause_set_variables(cl, MAX_VARS);
       cl->justification = term_to_just(just_term);
       if (str_to_int(s, &id))
@@ -735,6 +744,8 @@ int main(int argc, char **argv)
       proof = plist_prepend(proof, cl);
 
       rc = fscanf(fin, "%s", s);         /* clause id */
+      if (rc != 1)
+	fatal_error("proof ends prematurely (truncated input?)");
     }
     proof = reverse_plist(proof);
     proofs = plist_append(proofs, proof);

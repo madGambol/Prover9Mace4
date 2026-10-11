@@ -25,6 +25,7 @@ realclean:
 	/bin/rm -f *.o $(PROGRAMS)
 
 install:
+	/bin/mkdir -p ../bin
 	/bin/mv $(PROGRAMS) ../bin
 
 tags:
