@@ -37,8 +37,8 @@ void read_tptp_file(FILE *fin, FILE *fout, BOOL echo, int unknown_action)
       }
       FILE *fin2 = fopen(fname2, "r");
       if (fin2 == NULL) {
-	char s[100];
-	sprintf(s, "read_tptp_file, file %s not found", fname2);
+	char s[1024];   /* the filename comes from an include() directive */
+	snprintf(s, sizeof(s), "read_tptp_file, file %s not found", fname2);
 	fatal_error(s);
       }
       if (echo)

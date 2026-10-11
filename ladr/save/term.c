@@ -505,8 +505,8 @@ a String_buf.  A newline is not included.
 void sprint_term(String_buf sb, Term t)
 {
   if (VARIABLE(t)) {
-    char s[MAX_NAME];
-    sprintf(s, "v%d", VARNUM(t));
+    char s[13];   /* "v" + an int + NUL */
+    snprintf(s, sizeof(s), "v%d", VARNUM(t));
     sb_append(sb, s);
   }
   else {

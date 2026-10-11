@@ -2573,7 +2573,7 @@ void create_profile(Interp a, Plist discriminators)
 void p_interp_profile(Interp a, Plist discriminators)
 {
   int i, j, k;
-  char str[10];
+  char str[MAX_VAR_SYMBOL_SIZE];   /* was char[10], too small for "v-2147483648" */
   Plist p;
   printf("\n========================== PROFILE\n");
   fprint_interp_standard2(stdout, a);
@@ -2594,7 +2594,7 @@ void p_interp_profile(Interp a, Plist discriminators)
       int nvars = greatest_variable_in_clause(c->literals) + 1;
       fwrite_clause(stdout, c, CL_FORM_BARE);
       for (j = 0; j < nvars; j++, i++) {
-	symbol_for_variable(str, j);
+	symbol_for_variable(str, sizeof(str), j);
 	printf("          %s:             ", str);
 	for (k = 0; k < a->size; k++) {
 	  printf(" %3d", a->profile[k][i]);

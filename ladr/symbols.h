@@ -194,7 +194,12 @@ Variable_style variable_style(void);
 
 BOOL variable_name(char *s);
 
-void symbol_for_variable(char *str, int varnum);
+/* Smallest buffer that always holds a symbol_for_variable() result:
+   one leading letter plus a full int, NUL included (e.g. "v-2147483648"). */
+
+#define MAX_VAR_SYMBOL_SIZE (INT_STRING_SIZE + 1)
+
+void symbol_for_variable(char *str, size_t size, int varnum);
 
 Ilist variable_symbols(Ilist syms);
 

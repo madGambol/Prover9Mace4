@@ -1376,36 +1376,43 @@ BOOL variable_name(char *s)
  *************/
 
 /* DOCUMENTATION
-Given a pointer to a string and a variable index,
-fill in the string with the variable symbol.
+Given a pointer to a string, the size of that string's buffer, and a
+variable index, fill in the string with the variable symbol.
 The variable symbol is determined by the current
 variable style (standard, prolog, integer, etc.),
 which can be changed with set_variable_style().
+<P>
+The buffer should be at least MAX_VAR_SYMBOL_SIZE bytes; the longest
+result is a letter followed by a full int, e.g. "v-2147483648".
 */
 
 /* PUBLIC */
-void symbol_for_variable(char *str, int varnum)
+void symbol_for_variable(char *str, size_t size, int varnum)
 {
+  /* A truncated result would silently rename a variable in printed output,
+     so too small a buffer is a programming error, not a soft failure. */
+  if (size < MAX_VAR_SYMBOL_SIZE)
+    fatal_error("symbol_for_variable, buffer smaller than MAX_VAR_SYMBOL_SIZE");
   if (variable_style() == INTEGER_STYLE)
     /* 0,1,2,3,4,5,6,7,... */
-    sprintf(str, "%d", varnum);
+    snprintf(str, size, "%d", varnum);
   else if (variable_style() == PROLOG_STYLE) {
     /* A,B,C,D,E,F,V6,V7,V8,... */
     if (varnum < 6)
-      sprintf(str, "%c", 'A' + varnum);
+      snprintf(str, size, "%c", 'A' + varnum);
     else
-      sprintf(str, "V%d", varnum);
+      snprintf(str, size, "V%d", varnum);
   }
   else {
     /* x,y,z,u,w,v5,v6,v7,v8,... */
     if (varnum < 3)
-      sprintf(str, "%c", 'x' + varnum);
+      snprintf(str, size, "%c", 'x' + varnum);
     else if (varnum == 3)
-      sprintf(str, "%c", 'u');
+      snprintf(str, size, "%c", 'u');
     else if (varnum == 4)
-      sprintf(str, "%c", 'w');
+      snprintf(str, size, "%c", 'w');
     else
-      sprintf(str, "v%d", varnum);
+      snprintf(str, size, "v%d", varnum);
   }
 }  /* symbol_for_variable */
 
@@ -1875,15 +1882,19 @@ in the symbol table (with any arity), they will be skipped.
 /* PUBLIC */
 int next_skolem_symbol(int arity)
 {
-  char name[20];
+  /* Sized for the longest prefix the symbol table can hold plus a full
+     int, so it stays correct if the prefixes above ever change. */
+  char name[MAX_NAME + INT_STRING_SIZE];
 
   do {
     if (arity == 0) {
-      sprintf(name, "%s%d", Skolem_constant_prefix, Next_skolem_constant);
+      snprintf(name, sizeof(name), "%s%d",
+	       Skolem_constant_prefix, Next_skolem_constant);
       Next_skolem_constant++;
     }
     else {
-      sprintf(name, "%s%d", Skolem_function_prefix, Next_skolem_function);
+      snprintf(name, sizeof(name), "%s%d",
+	       Skolem_function_prefix, Next_skolem_function);
       Next_skolem_function++;
     }
   } while (!skolem_ok(name,arity));
@@ -2710,7 +2721,7 @@ arity).  The prefix must be less than MAX_NAME characters.
 /* PUBLIC */
 int fresh_symbol(char *prefix, int arity)
 {
-  char name[MAX_NAME+20];
+  char name[MAX_NAME + INT_STRING_SIZE];
   int i = 0;
 
   if (strlen(prefix) > MAX_NAME) {
@@ -2718,7 +2729,7 @@ int fresh_symbol(char *prefix, int arity)
   }
 
   do {
-    sprintf(name, "%s%d", prefix, i);
+    snprintf(name, sizeof(name), "%s%d", prefix, i);
     i++;
   } while (str_exists(name));
 
@@ -2737,19 +2748,19 @@ int fresh_symbol(char *prefix, int arity)
 /* PUBLIC */
 int gen_new_symbol(char *prefix, int arity, Ilist syms)
 {
-  char name[MAX_NAME+20];
+  char name[MAX_NAME + INT_STRING_SIZE];
   int symnum;
   int i = 0;
 
   if (strlen(prefix) > MAX_NAME)
     fatal_error("gen_new_symbol, prefix is too big.");
 
-  sprintf(name, "%s%d", prefix, i);
+  snprintf(name, sizeof(name), "%s%d", prefix, i);
   symnum = str_to_sn(name, arity);
 
   while (ilist_member(syms, symnum)) {
     i++;
-    sprintf(name, "%s%d", prefix, i);
+    snprintf(name, sizeof(name), "%s%d", prefix, i);
     symnum = str_to_sn(name, arity);
   }
 

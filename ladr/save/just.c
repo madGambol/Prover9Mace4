@@ -654,7 +654,8 @@ char *jmap2(Ilist map, int i, char *a)
   }
   else {               /* "A26", ... */
     a[0] = 'A';
-    sprintf(a+1, "%d", n);
+    /* Caller must supply at least 13 bytes: 'A', an int, and NUL. */
+    snprintf(a+1, 12, "%d", n);
   }
   return a;
 }  /* jmap2 */

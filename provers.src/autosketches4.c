@@ -38,8 +38,9 @@ void attach_sketch_hint_labels(int sketch_count, Plist hints)
   for (p = hints, hint_count = 1; p; p = p->next, hint_count++) {
     Topform c = p->v;
     if (!exists_attribute(c->attributes, label_att())) {
-      char s[100];
-      sprintf(s, "S%d_H%d", sketch_count, hint_count);
+      /* "S" + int + "_H" + int */
+      char s[2 * INT_STRING_SIZE + 4];
+      snprintf(s, sizeof(s), "S%d_H%d", sketch_count, hint_count);
       c->attributes = set_string_attribute(c->attributes, label_att(), s);
     }
   }

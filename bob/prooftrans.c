@@ -279,8 +279,8 @@ int main(int argc, char **argv)
     filename = argv[n+1];
     fin = fopen(filename, "r");
     if (fin == NULL) {
-      char s[100];
-      sprintf(s, "file %s not found", argv[n+1]);
+      char s[1024];   /* the filename comes from the command line */
+      snprintf(s, sizeof(s), "file %s not found", argv[n+1]);
       fatal_error(s);
     }
   }
@@ -440,11 +440,18 @@ int main(int argc, char **argv)
 
       Topform c = p->v;
       if (label) {
-	char s[100];
 	/* quote it only if necessary */
 	char *q = (ordinary_constant_string(label) ? "" : "\"");
-	sprintf(s, "%s%s_%d%s", q, label, ++n, q);
+	/* label comes from the command line and has no length limit, so
+	   size the buffer from it: two quotes, '_', an int, and NUL. */
+	size_t size = strlen(label) + 2*strlen(q) + 13;
+	char *s = malloc(size);
+	if (s == NULL)
+	  fatal_error("prooftrans, out of memory for hint label");
+	snprintf(s, size, "%s%s_%d%s", q, label, ++n, q);
+	/* set_string_attribute() interns a copy, so s can be released. */
 	c->attributes = set_string_attribute(c->attributes, label_attr, s);
+	free(s);
       }
       fwrite_clause(stdout, c, CL_FORM_BARE);
     }

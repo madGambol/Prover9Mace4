@@ -1031,14 +1031,20 @@ if the int value of is INT_MIN, "" is returned.
 
 Starting with 0, the strings are "A" - "Z", "A26", "A27", ... .
 
-The argument *a must point to available space for the result.
+The argument *a must point to available space for the result, and size
+is the size of that space; MAX_JMAP_SYMBOL_SIZE is always enough.
 The result is returned.
  */
 
 /* PUBLIC */
-char *jmap2(I3list map, int i, char *a)
+char *jmap2(I3list map, int i, char *a, size_t size)
 {
   int n = assoc2b(map, i);
+  /* A truncated result would be a silently wrong clause-id label in proof
+     output, so a buffer that cannot hold every result is a programming
+     error rather than something to paper over. */
+  if (size < MAX_JMAP_SYMBOL_SIZE)
+    fatal_error("jmap2, buffer smaller than MAX_JMAP_SYMBOL_SIZE");
   if (n == INT_MIN)
     a[0] = '\0';
   else if (n >= 0 && n <= 25) {   /* "A" -- "Z" */
@@ -1047,7 +1053,7 @@ char *jmap2(I3list map, int i, char *a)
   }
   else {               /* "A26", ... */
     a[0] = 'A';
-    sprintf(a+1, "%d", n);
+    snprintf(a+1, size-1, "%d", n);
   }
   return a;
 }  /* jmap2 */
@@ -1064,9 +1070,9 @@ char *jmap2(I3list map, int i, char *a)
 /* PUBLIC */
 void sb_append_id(String_buf sb, int id, I3list map)
 {
-  char s[21];
+  char s[MAX_JMAP_SYMBOL_SIZE];
   sb_append_int(sb, jmap1(map, id));
-  sb_append(sb, jmap2(map, id, s));
+  sb_append(sb, jmap2(map, id, s, sizeof(s)));
 }  /* sb_append_id */
 
 /*************

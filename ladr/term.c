@@ -538,8 +538,8 @@ void sprint_term(String_buf sb, Term t)
     printf("sprint_term: NULL term\n");
   else {
     if (VARIABLE(t)) {
-      char s[MAX_NAME];
-      sprintf(s, "v%d", VARNUM(t));
+      char s[INT_STRING_SIZE + 1];   /* "v" + a full int */
+      snprintf(s, sizeof(s), "v%d", VARNUM(t));
       sb_append(sb, s);
     }
     else {

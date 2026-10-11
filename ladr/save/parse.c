@@ -1234,24 +1234,24 @@ void arrange_term(String_buf sb, Term t, int par_prec)
   if (t == NULL)
     sb_append(sb, "arrange_term gets NULL term");
   else if (VARIABLE(t)) {
-    char str[100];
+    char str[13];   /* one letter + an int + NUL */
     if (variable_style() == INTEGER_STYLE)
-      sprintf(str, "%d", VARNUM(t));
+      snprintf(str, sizeof(str), "%d", VARNUM(t));
     else if (variable_style() == PROLOG_STYLE) {
       /* A,B,C,D,E,F,V6,V7,V8,... */
       if (VARNUM(t) < 6)
-	sprintf(str, "%c", 'A' + VARNUM(t));
+	snprintf(str, sizeof(str), "%c", 'A' + VARNUM(t));
       else
-	sprintf(str, "V%d", VARNUM(t));
+	snprintf(str, sizeof(str), "V%d", VARNUM(t));
     }
     else {
       /* x,y,z,u,v,w,v6,v7,v8,... */
       if (VARNUM(t) < 3)
-	sprintf(str, "%c", 'x' + VARNUM(t));
+	snprintf(str, sizeof(str), "%c", 'x' + VARNUM(t));
       else if (VARNUM(t) < 6)
-	sprintf(str, "%c", 'r' + VARNUM(t));
+	snprintf(str, sizeof(str), "%c", 'r' + VARNUM(t));
       else
-	sprintf(str, "v%d", VARNUM(t));
+	snprintf(str, sizeof(str), "v%d", VARNUM(t));
     }
     sb_append(sb, str);
   }  /* variable */

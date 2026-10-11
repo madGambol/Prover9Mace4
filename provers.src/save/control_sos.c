@@ -68,8 +68,9 @@ BOOL sos_keep(Topform c, Clist sos, Prover_options opt)
   if (current_size < x * limit_size)
     return TRUE;
   else if (current_size > limit_size) {
-    char mess[100];
-    sprintf(mess, "sos_keep, sos too big, limit is %d", parm(opt->sos_limit));
+    char mess[100];   /* 34 chars of text + an int fits easily */
+    snprintf(mess, sizeof(mess),
+	     "sos_keep, sos too big, limit is %d", parm(opt->sos_limit));
     fatal_error(mess);
     return FALSE;
   }

@@ -33,4 +33,10 @@ typedef enum { FALSE=0, TRUE=1 } BOOL;
 
 #define DBL_LARGE 10E11
 
+/* Bytes needed to hold any int formatted with "%d", NUL included:
+   "-2147483648" is 11 characters, so 12.  Use this when sizing a buffer
+   that formats an integer, rather than guessing. */
+
+#define INT_STRING_SIZE 12
+
 #endif  /* conditional compilation of whole file */

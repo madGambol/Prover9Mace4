@@ -89,7 +89,7 @@ Term random_term(int v, int a0, int a1, int a2, int a3,
     default: s = "?"; break;
     }
 
-    sprintf(symbol, "%s%d", s, j);
+    snprintf(symbol, sizeof(symbol), "%s%d", s, j);
     t = get_rigid_term(symbol, arity);
     for (i = 0; i < arity; i++)
       ARG(t,i) = random_term(v, a0, a1, a2, a3, max_depth-1);

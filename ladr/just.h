@@ -189,7 +189,12 @@ char *jstring(Just j);
 
 int jmap1(I3list map, int i);
 
-char *jmap2(I3list map, int i, char *a);
+/* Smallest buffer that always holds a jmap2() result: a leading 'A'
+   followed by a full int, NUL included (e.g. "A-2147483648"). */
+
+#define MAX_JMAP_SYMBOL_SIZE (INT_STRING_SIZE + 1)
+
+char *jmap2(I3list map, int i, char *a, size_t size);
 
 void sb_append_id(String_buf sb, int id, I3list map);
 

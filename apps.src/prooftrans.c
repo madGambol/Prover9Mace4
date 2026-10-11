@@ -478,11 +478,20 @@ int main(int argc, char **argv)
 
       Topform c = p->v;
       if (label) {
-	char s[100];
 	/* quote it only if necessary */
 	char *q = (ordinary_constant_string(label) ? "" : "\"");
-	sprintf(s, "%s%s_%d%s", q, label, ++n, q);
+	/* label comes from the command line and has no length limit, so
+	   size the buffer from it rather than guessing: both quotes, the
+	   label, '_', a full int, and NUL, plus slack.  This used to be
+	   char[100], which overflowed for a long -label. */
+	size_t size = 2*strlen(q) + strlen(label) + 1 + INT_STRING_SIZE + 8;
+	char *s = malloc(size);
+	if (s == NULL)
+	  fatal_error("prooftrans, out of memory for hint label");
+	snprintf(s, size, "%s%s_%d%s", q, label, ++n, q);
+	/* set_string_attribute() interns a copy, so s can be released. */
 	c->attributes = set_string_attribute(c->attributes, label_attr, s);
+	free(s);
       }
       fwrite_clause(stdout, c, CL_FORM_BARE);
     }

@@ -1414,8 +1414,8 @@ void arrange_term(String_buf sb, Term t, int par_prec)
   if (t == NULL)
     sb_append(sb, "arrange_term gets NULL term");
   else if (VARIABLE(t)) {
-    char str[100];
-    symbol_for_variable(str, VARNUM(t));
+    char str[MAX_VAR_SYMBOL_SIZE];
+    symbol_for_variable(str, sizeof(str), VARNUM(t));
     sb_append(sb, str);
   }  /* variable */
 

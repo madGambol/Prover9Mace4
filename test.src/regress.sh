@@ -40,6 +40,11 @@ chk "M2  prover9 long missing filename (overflow)" \
 chk "M3  prooftrans long missing filename (overflow)" \
     'timeout 30 "$B/prooftrans" -f "$LONG" 2>&1 | grep -q "not found"'
 
+# M5: -label is formatted into a fixed char[100]; a long label overflows it
+# (glibc fortify aborts).  The label must survive intact in the output.
+chk "M5  prooftrans -label with a 300-char label (overflow)" \
+    'timeout 30 "$B/prooftrans" hints -label "$LONG" < "$W/proof.txt" 2>/dev/null | grep -q "${LONG}_1"'
+
 # F1: input text used as a printf format string (segfaults before the fix).
 chk "F1  format directives in fastparse input (crash)" \
     'timeout 30 "$B/unfast" < "$W/fmt.in" >/dev/null 2>&1; [ $? -ne 139 ]'
@@ -51,6 +56,13 @@ chk "D1  directproof on truncated proof (hang)" \
     'timeout 30 "$B/directproof" < "$W/trunc.txt" >/dev/null 2>&1; [ $? -eq 1 ]'
 chk "D1  prooftrans still handles a complete proof" \
     'timeout 30 "$B/prooftrans" parents_only < "$W/proof.txt" 2>&1 | grep -q "end of proof"'
+
+# D1 side effect: the drain loop used to swallow the blank line after the
+# comment block and print it back, so upstream emits two blank lines between
+# a proof's comments and its first clause.  There must now be exactly one.
+chk "D1  exactly one blank line after the proof comments" \
+    'timeout 30 "$B/prooftrans" < "$W/proof.txt" 2>/dev/null \
+       | awk "/^% Given clauses/{g=NR} g&&NR>g&&/^\$/{n++} g&&NR>g&&!/^\$/{exit} END{exit !(n==1)}"'
 
 # N1/N2/N3: derived parm values that used to abort the program.
 chk "N1  assign(max_minutes,-1) accepted" \

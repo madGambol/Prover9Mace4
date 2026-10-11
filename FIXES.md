@@ -20,6 +20,8 @@ defaults to `-std=gnu23`.
 | M2 | Stack buffer overflow on a long input filename | `ladr/top_input.c:892` | memory safety |
 | M3 | Same, in 4 more programs | `prooftrans`, `directproof`, `interpformat`, `tptp_to_ladr` | memory safety |
 | M4 | Two more unbounded message buffers | `ladr/termorder.c`, `ladr/options.c` | hardening |
+| M5 | Stack buffer overflow from `prooftrans -label`; **aborts** | `apps.src/prooftrans.c:481` | memory safety |
+| M6 | All 30 remaining `sprintf` → `snprintf`, buffers sized to the widest output; exposed a too-small buffer in `interp.c` | whole tree | memory safety |
 | F1 | Input used as a `printf` format — **segfaults** | `ladr/fastparse.c:186` | memory safety |
 | F2 | Non-literal formats in the model printer | `mace4.src/print.c` | hardening |
 | D1 | Truncated proof ⇒ **infinite loop**, then NULL deref | `prooftrans.c:368`, `directproof.c:713` | hang / crash |
@@ -38,9 +40,14 @@ defaults to `-std=gnu23`.
 All fixed except **L1**, which is in a function with no callers anywhere in the
 tree and so cannot be validated; it is written up instead.
 
-New tests: `make -C test.src check` runs 22 regression tests (each fails on
-pristine upstream), a `String_buf` unit test, and a Mace4 soundness check that
-independently verifies 271 reported models against their input clauses.
+New tests: `make -C test.src check` runs 24 regression tests (19 of which fail
+on pristine upstream), a `String_buf` unit test, and a Mace4 soundness check
+that independently verifies 271 reported models against their input clauses.
+
+One **intended output change** on ordinary input: `prooftrans` and
+`directproof` now emit one blank line, not two, between a proof's comments and
+its first clause. That blank line was being swallowed and reprinted by the D1
+defect; see "Visible output change" under D1.
 
 ## How the survey was done
 
@@ -51,6 +58,8 @@ independently verifies 271 reported models against their input clauses.
 | The same ASan + UBSan sweep re-run **after** the fixes | **0 findings** |
 | 350 rounds of mutational fuzzing of both parsers | 0 new memory errors — only the same `giv_select` overflow |
 | Targeted review of every `sprintf`, format-string, `strlen()` index, `double`→`int` conversion, and loop-variable reuse | findings M1–M4, F1–F2, D1, U3, S1 |
+| Exhaustive `sprintf` → `snprintf` conversion with each buffer sized to its format's widest output | finding M5 (missed on the first pass) and a too-small buffer in `interp.c` |
+| Rebuild with `-Wformat-truncation=2 -Wformat-overflow=2 -Wstringop-overflow=4` | **no truncation or overflow warnings**: every destination is provably large enough |
 | `make test1` / `test2` / `test3` | pass before and after |
 | A/B diff of normalised output over the whole corpus, baseline vs fixed | see "Behaviour preservation" |
 
@@ -195,6 +204,37 @@ are the identical construct. `tptp_to_ladr`'s copy takes the filename from an
 
 **Fix** — `char s[1024]` and `snprintf` in all four.
 
+### M5 — stack buffer overflow from `prooftrans -label` *(confirmed with ASan)*
+`apps.src/prooftrans.c:481`
+
+```c
+char s[100];
+char *q = (ordinary_constant_string(label) ? "" : "\"");
+sprintf(s, "%s%s_%d%s", q, label, ++n, q);
+```
+
+`label` is `argv[n+1]` of the `-label` option, so it has no length limit. A
+label longer than about 85 characters overflows the buffer:
+
+```
+$ prooftrans hints -label <300 chars> < proof.txt     # pristine, ASan
+AddressSanitizer: stack-buffer-overflow ... WRITE of size 153
+  [96, 196) 's' (line 481)
+  #3 main apps.src/prooftrans.c:484
+
+$ prooftrans hints -label <300 chars> < proof.txt     # pristine, ordinary build
+*** buffer overflow detected ***: terminated          # SIGABRT, rc=134
+```
+
+This one was missed on the first pass, which only looked for the
+`"file %s not found"` shape; it turned up in the follow-up sweep that
+converted every remaining `sprintf`.
+
+**Fix** — the label length is only known at run time, so the buffer is sized
+from it (`malloc`) rather than guessed, and written with `snprintf`.
+`set_string_attribute` interns a copy of the string, so the buffer is freed
+immediately afterwards.
+
 ### M4 — two more fixed-size message buffers (hardening)
 `ladr/termorder.c:433` (`char mess[200]` + a symbol name),
 `ladr/options.c:239` (`char s[100]` + a flag name)
@@ -211,6 +251,62 @@ Also audited and found **safe**: `ladr/symbols.c` `next_skolem_symbol`
 `provers.src/tptp_to_ladr.c` (each provably reached with length ≥ 1).
 
 ---
+
+### M6 — every remaining `sprintf` converted to `snprintf`
+whole tree — 30 call sites
+
+After the individual fixes above, the tree still had 30 `sprintf` calls. All of
+them are now `snprintf`, with each destination sized to hold the widest output
+its format can produce rather than a round number picked by eye.
+
+A new constant documents the one recurring quantity:
+
+```c
+/* ladr/header.h -- bytes to hold any int formatted with "%d", NUL included:
+   "-2147483648" is 11 characters, so 12. */
+#define INT_STRING_SIZE 12
+```
+
+18 of the 30 are in the compiled programs. The other 12 are in `ladr/save/`,
+`bob/` and `provers.src/save/` — stale duplicate sources that upstream shipped
+but that no Makefile references (`ladr/save/just.c` still carries the old
+`jmap2(Ilist, ...)` signature). Those were converted for consistency so that
+`grep sprintf` over the tree comes back empty, but **they are not compiled, so
+unlike everything else in this document those twelve edits are not exercised by
+any build or test.**
+
+Two functions write into a buffer their caller owns, which `sprintf` gave them
+no way to bound. Both now take the size, so the compiler checks every call
+site, and both reject a buffer that is too small instead of truncating —
+a truncated variable name or clause-id label would be silently wrong output
+in a proof, which is worse than a loud failure:
+
+```c
+void  symbol_for_variable(char *str, size_t size, int varnum);   /* was (str, varnum) */
+char *jmap2(I3list map, int i, char *a, size_t size);            /* was (map, i, a)   */
+```
+
+That change exposed a real latent overflow: `ladr/interp.c` was passing
+`char str[10]` to `symbol_for_variable`, which can write 13 bytes
+(`"v-2147483648"`). Its buffer is now `MAX_VAR_SYMBOL_SIZE`.
+
+The sizing is verified by the compiler rather than by inspection. Building with
+
+```
+-Wformat-truncation=2 -Wformat-overflow=2 -Wstringop-overflow=4 -Wformat=2
+```
+
+reports **no truncation and no overflow warnings** anywhere in the tree, i.e.
+GCC can prove every destination is large enough for its format. The two
+warnings this flushed out while the work was in progress were both acted on:
+`jmap2`'s unbounded `size` parameter (now range-checked) and `prooftrans`'s
+runtime size arithmetic (now written so the bound is obvious, with slack).
+
+The five remaining `-Wformat-nonliteral` warnings are intentional and already
+guarded: `ladr/string.c`'s `double_to_str` passes the configurable
+`Float_format` and checks `snprintf`'s return against the buffer size, and
+`mace4.src/print.c` chooses between the literals `"%2d"` and `"%3d"` at run
+time.
 
 ## Format-string bugs
 
@@ -310,6 +406,32 @@ and stop at `EOF`; check the `fgets` and `fscanf` return values; reject a
 $ prooftrans < truncated-proof
 Fatal error:  proof ends prematurely (truncated input?)      [exit 1]
 ```
+
+#### Visible output change: one blank line per proof
+
+Defect (a) had a second, benign consequence that is worth stating plainly,
+because it is the one place where fixed output differs from upstream on
+ordinary input. Because the drain loop ran after *every* comment line, it
+swallowed the line following the comment block — a blank line — into the
+comment buffer and printed it back. Upstream therefore emits **two** blank
+lines between a proof's comments and its first clause; the fixed build emits
+**one**:
+
+```
+% Given clauses 12.
+                      <- separator, from the proof file
+                      <- upstream only: the line the drain loop swallowed
+1 x * y = y * x # label(non_clause) # label(goal).  [goal].
+```
+
+Checked across both tools and all seven output formats, on a 1-proof and a
+3-proof input: the *only* difference anywhere is one such blank line per
+proof (so 3 lines for the 3-proof input), and the `hints` and `ivy` formats of
+`prooftrans`, which do not reproduce the comment block, are byte-identical.
+`test.src/regress.sh` pins this down.
+
+This did not show up in the original corpus A/B diff because that compared
+`prover9` and `mace4` only, not the apps built on top of them.
 
 ---
 
@@ -738,8 +860,35 @@ SOUNDNESS OK: 271 models verified, every one satisfies every input clause
 Baseline and fixed produce **the same 271 models**, with identical per-size
 counts.
 
-**5. Regression suite.** `test.src/regress.sh` — 22 tests, all passing on the
-fixed tree, 17 of them failing on the baseline. The 5 that pass on both are the
+**5. The apps.** The first three checks cover `prover9` and `mace4`; the
+programs built on top of them were checked separately, because the `snprintf`
+work touched the shared term- and justification-printing paths
+(`ladr/term.c`, `ladr/parse.c`, `ladr/just.c`, `ladr/symbols.c`).
+`prooftrans` and `directproof` were run in all seven output formats over a
+1-proof and a 3-proof input, including the `expand` and `tagged` formats that
+exercise the `jmap2` clause-id labels whose buffer shrank from `char[21]` to
+`MAX_JMAP_SYMBOL_SIZE`:
+
+| | result |
+| --- | --- |
+| `hints`, `ivy` (`prooftrans`) | byte-identical |
+| every other format, both tools | one blank line per proof removed, nothing else |
+
+That blank line is the intended D1 side effect described above, not a
+regression. **This is also a gap in the earlier verification worth naming: the
+corpus A/B diff ran only `prover9` and `mace4`, so it could not have surfaced
+this.**
+
+`interpformat`, `isofilter` and `clausetester` are exercised by `make test2`,
+`make test3` and the soundness check above.
+
+**6. Buffer sizing, checked by the compiler.** Rebuilding with
+`-Wformat-truncation=2 -Wformat-overflow=2 -Wstringop-overflow=4 -Wformat=2`
+produces no truncation or overflow warnings, so every `snprintf` destination is
+provably large enough for the widest output its format can produce.
+
+**7. Regression suite.** `test.src/regress.sh` — 24 tests, all passing on the
+fixed tree, 19 of them failing on the baseline. The 5 that pass on both are the
 deliberate "must not regress" controls (a complete proof still transforms
 correctly, in-range parm derivations still produce their old values, a default
 Prover9 run still finds its proof).
