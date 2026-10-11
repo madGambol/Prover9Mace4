@@ -55,7 +55,7 @@ defect; see "Visible output change" under D1.
 | --- | --- |
 | Build with GCC 15, then `-Wextra -Wformat=2 -Wshadow` | 3 hard errors, 39 warnings → 23 (all remaining are benign unused-variable/debug-helper warnings) |
 | ASan + UBSan build, 168-file corpus (upstream manual + web examples) through `prover9` and `mace4` | 1 distinct UBSan finding (`giv_select`, hit by 135 of 168 files), 0 ASan findings; `mace4` entirely clean |
-| The same ASan + UBSan sweep re-run **after** the fixes | **0 findings** |
+| The same ASan + UBSan sweep re-run **after** the fixes, and again after the `snprintf` conversion | **0 findings** both times, over all 168 files for each program |
 | 350 rounds of mutational fuzzing of both parsers | 0 new memory errors — only the same `giv_select` overflow |
 | Targeted review of every `sprintf`, format-string, `strlen()` index, `double`→`int` conversion, and loop-variable reuse | findings M1–M4, F1–F2, D1, U3, S1 |
 | Exhaustive `sprintf` → `snprintf` conversion with each buffer sized to its format's widest output | finding M5 (missed on the first pass) and a too-small buffer in `interp.c` |
@@ -808,6 +808,10 @@ is otherwise untouched):
 **1. Upstream's own smoke tests** — `make test1` / `test2` / `test3` pass before
 and after.
 
+These numbers are from the final tree (after the `snprintf` conversion); the
+run before that conversion produced the identical counts on the identical
+files, so the conversion changed no output anywhere.
+
 **2. Prover9, output diff over the whole corpus.** 168 inputs, run through both
 binaries, with timings, PIDs, dates, host names and memory figures normalised
 away. Searches were bounded by `max_given=300` rather than by wall-clock time,
@@ -882,10 +886,29 @@ this.**
 `interpformat`, `isofilter` and `clausetester` are exercised by `make test2`,
 `make test3` and the soundness check above.
 
-**6. Buffer sizing, checked by the compiler.** Rebuilding with
+**6. Buffer sizing, checked by the compiler and at run time.** Rebuilding with
 `-Wformat-truncation=2 -Wformat-overflow=2 -Wstringop-overflow=4 -Wformat=2`
 produces no truncation or overflow warnings, so every `snprintf` destination is
-provably large enough for the widest output its format can produce.
+provably large enough for the widest output its format can produce. A fresh
+ASan + UBSan build was then swept over the whole corpus again, 168 files
+through each program: **0 findings**.
+
+That zero is not vacuous. The sweep binaries are genuinely instrumented
+(`__asan_init` and the UBSan handlers are linked in), the harness reports
+`# scanned 168 files` for each program, and a positive control confirms the
+same harness and environment still detect a real defect — re-running the
+pre-fix instrumented build on `wang/wang.in` reports
+`giv_select.c:152: signed integer overflow` as it always did, while the fixed
+build on the same input reports nothing.
+
+The programs built on top of the libraries were also checked directly, since
+the corpus sweep drives only `prover9` and `mace4`: `prooftrans` and
+`directproof` in all seven output formats under ASan + UBSan **with leak
+detection enabled** are clean in all 14 combinations, the new `-label`
+allocation leaks nothing and reproduces a 300-character label intact, and
+Mace4's model printer is clean at domain sizes 4, 10, 11 and 12 — the sizes
+either side of the `n <= 10` formatting switch in `print.c` that S1 and F2
+touched.
 
 **7. Regression suite.** `test.src/regress.sh` — 24 tests, all passing on the
 fixed tree, 19 of them failing on the baseline. The 5 that pass on both are the
