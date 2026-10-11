@@ -30,7 +30,7 @@ ladr:
 	$(MAKE) clean
 
 mace4: libmace4.a mace4.o $(OBJECTS)
-	$(CC) $(CFLAGS) -o mace4 mace4.o libmace4.a ../ladr/libladr.a
+	$(CC) $(CFLAGS) -o mace4 mace4.o libmace4.a ../ladr/libladr.a -lm
 
 $(OBJECTS): estack.h syms.h ground.h propagate.h mstate.h msearch.h
 
