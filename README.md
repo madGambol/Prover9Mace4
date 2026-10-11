@@ -5,11 +5,18 @@ paramodulation theorem prover for first-order and equational logic) and Mace4
 (a finite-model searcher for the same input language), with the changes needed
 to make it build and run correctly on a current compiler.
 
-Upstream has had no release since November 2009. On a modern toolchain the
-original source does not compile at all, and once it does compile it carries
-several defects that are reachable from ordinary input — including four stack
-buffer overflows, an uncontrolled format string, and undefined behaviour on
-every default Prover9 run.
+LADR-2009-11A was McCune's last release, and on a modern toolchain it does not
+compile at all. Once it does compile it carries several defects reachable from
+ordinary input — including four stack buffer overflows, an uncontrolled format
+string, and undefined behaviour on every default Prover9 run.
+
+**If you just want a current Prover9, use [LADR-2026](https://prover9.org)**
+(source at [AlgorithmicTruth/Prover9](https://github.com/AlgorithmicTruth/Prover9)),
+the substantially revised version released in March 2026 by Jeffrey P. Machado
+and Larry Lesyna. McCune's own page now recommends it for all users, and it
+adds native TPTP/TSTP support, premise selection, parallel scheduling and much
+more. This tree is a narrower thing: an audit of the 2009 release that stays
+behaviourally identical to it. See "Relationship to LADR-2026" below.
 
 The first commit in this repository is the **unmodified upstream tarball**, so
 
@@ -87,6 +94,25 @@ There is **one intended output change** on ordinary input: `prooftrans` and
 its first clause. Upstream's comment-drain loop was swallowing that line and
 printing it back; see "Visible output change" in `FIXES.md`.
 
+## Relationship to LADR-2026
+
+LADR-2026 is the active upstream and the right default for most people. It is a
+much larger project — roughly 120,000 lines against upstream's 82,000 — and it
+independently fixes several of the same defects this tree does, including the
+C23 build errors, the `-lm` link order, the Mace4 domain-size overflow, the
+quadratic `String_buf` append, and the given-clause selection overflow that
+fires on every default run.
+
+The two trees answer different questions. LADR-2026 asks what Prover9 and Mace4
+should become; this tree asks what exactly was wrong with what McCune shipped,
+and shows the evidence. It is six commits on top of the pristine tarball, so
+every change is auditable in isolation, and the measurements in `FIXES.md` say
+what each fix does and does not change.
+
+That makes this tree useful if you want the 2009 release with its defects fixed
+and nothing else altered — for reproducing published results, for packaging, or
+as a base to audit.
+
 ## Scope
 
 This is a maintenance tree, not a fork that intends to diverge. It does not
@@ -110,5 +136,11 @@ tree.
 
 Prover9, Mace4 and the LADR library are the work of William McCune, released
 from `http://www.cs.unm.edu/~mccune/prover9/`, which also hosted the HTML
-manual and examples. This repository is not affiliated with or endorsed by the
-original author or his institutions.
+manual and examples. That page now directs users to LADR-2026 at
+`https://prover9.org` and no longer links the 2009 downloads; the LADR-2009-11A
+tarball this tree starts from is archived by
+[Software Heritage](https://www.softwareheritage.org/) and mirrored at
+[theoremprover-museum/prover9](https://github.com/theoremprover-museum/prover9).
+
+This repository is not affiliated with or endorsed by McCune, his institutions,
+or the LADR-2026 maintainers.
