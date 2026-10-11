@@ -44,7 +44,7 @@ the original source. No configure step, no dependencies beyond libc and libm.
 make -C test.src check
 ```
 
-runs the test suite added here: 26 regression tests, a `String_buf` unit test,
+runs the test suite added here: 27 regression tests, a `String_buf` unit test,
 and a Mace4 soundness check that independently re-verifies 271 reported models
 against their input clauses using `interpformat` and `clausetester`.
 
@@ -53,6 +53,11 @@ after the fix, so the suite measures the fixes rather than just exercising the
 programs. Run against a baseline tree — upstream with *only* the three build
 fixes applied, since upstream alone does not compile — **21 of the 26 fail**.
 The 5 that pass on both sides are deliberate "must not regress" controls.
+
+One test, for the M7 heap overflow, can only be observed under a sanitizer;
+on an ordinary build it reports SKIP rather than a meaningless PASS, which is
+why the plain-build count is 26 of 27. Given a sanitizer build — pass its
+`bin` directory as an argument — all 27 run and pass.
 
 ## What was fixed
 
@@ -82,12 +87,15 @@ timings and memory figures normalised:
   `struct string_buf` grew it from 16 to 24 bytes, which shifts where a
   `max_megs` ceiling falls on two large problems and adds a line to the memory
   report on three others.
-- An ASan + UndefinedBehaviorSanitizer build over all 168 files reports
-  **0 findings** for each program, where the unfixed build reports undefined
-  behaviour on 135 of them. Read the "Correction" row in `FIXES.md` before
-  relying on that: the first three sweeps had only 1 of 77 library objects
-  instrumented, so their ASan result meant far less than it appeared to, and
-  re-running them properly is what turned up M7.
+- An ASan + UndefinedBehaviorSanitizer build over all 168 files, through both
+  programs — 336 instrumented runs — reports **0 findings**, where the unfixed
+  build reports undefined behaviour on 135 files and the M7 heap overflow on 5.
+  That zero is checked three ways, because an earlier version of the same claim
+  turned out to be vacuous and is retracted in `FIXES.md`: the tree is built
+  from `git archive` sources with no stale objects, instrumentation is verified
+  per object (137/137 compile lines, 77/77 library objects) rather than by
+  looking for the ASan runtime in the binary, and the positive control reinstates
+  a real defect *in the library* and confirms this build reports it.
 - Separately, 408 runs of `prooftrans`/`directproof` on deliberately malformed
   proof files, under the same sanitizers: 0 findings, against 96 for the
   unfixed build.

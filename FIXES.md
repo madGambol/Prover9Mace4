@@ -43,10 +43,12 @@ defaults to `-std=gnu23`.
 All fixed except **L1**, which is in a function with no callers anywhere in the
 tree and so cannot be validated; it is written up instead.
 
-New tests: `make -C test.src check` runs 26 regression tests (21 of which fail
-on the baseline — upstream with only the build fixes applied, since upstream
-alone does not compile), a `String_buf` unit test, and a Mace4 soundness check
-that independently verifies 271 reported models against their input clauses.
+New tests: `make -C test.src check` runs 27 regression tests — 26 on a plain
+build, since the M7 overflow is visible only under a sanitizer and that test
+reports SKIP rather than a meaningless PASS — of which 21 fail on the baseline
+(upstream with only the build fixes applied, since upstream alone does not
+compile). Plus a `String_buf` unit test and a Mace4 soundness check that
+independently verifies 271 reported models against their input clauses.
 
 One **intended output change** on ordinary input: `prooftrans` and
 `directproof` now emit one blank line, not two, between a proof's comments and
@@ -64,6 +66,9 @@ defect; see "Visible output change" under D1.
 | The check that was supposed to catch this — `nm` for `__asan_init` in the binary — is worthless for the purpose: linking the ASan runtime says nothing about which *objects* were instrumented. The positive control was equally misleading, because it used a `giv_select.c` defect, and `provers.src` was one of the directories that *did* get the flags. A control has to cover the code the claim is about. | lesson recorded rather than quietly fixed |
 | Rebuilt from `git archive` (sources only, no stale objects) plus `make clean`, then verified two ways before trusting any result: **137 of 137** compile lines carried `-fsanitize`, and **77 of 77** `libladr.a` objects reference `__asan` | finding **M7**, a heap buffer overflow in `ladr/dollar.c` reached by every production-mode example in the manual |
 | That corrected sweep, over the same 168 files per program, **before** the M7 fix | `prover9` **5 findings, all of them M7**; `mace4` **0 findings**; no UBSan findings. So the broken sweeps had concealed exactly one defect, not a collection |
+| The corrected sweep re-run on the finished tree (commit `96c8b5e`), 168 files × 2 programs = **336 instrumented runs** | **0 findings** — no ASan report, no UBSan report, no signal, no unexpected exit status. This is the number that replaces the retracted one above |
+| Positive control for *that* zero, on the same build: `ladr/dollar.c` reverted to its pre-fix state and nothing else, then rebuilt | the control binary reports `ERROR: AddressSanitizer: heap-buffer-overflow` on the M7 input; the shipped binary is clean on it. A defect in `ladr/` would have been seen, which is the claim the earlier control failed to establish |
+| Full regression suite run *against the instrumented build* rather than a plain one | **27 of 27 pass**, including the sanitizer-gated M7 test that reports SKIP on a plain build |
 | 350 rounds of mutational fuzzing of both parsers | 0 new memory errors — only the same `giv_select` overflow |
 | Targeted review of every `sprintf`, format-string, `strlen()` index, `double`→`int` conversion, and loop-variable reuse | findings M1–M4, F1–F2, D1, U3, S1 |
 | Line-by-line review of the committed diff, then malformed-input fuzzing of `prooftrans`/`directproof` (34 inputs × 2 tools × 6 formats = 408 runs under ASan+UBSan) | finding **D2**, which the corpus sweep could not reach: it drives only `prover9` and `mace4`, and the earlier targeted app checks used well-formed proofs |
@@ -1064,15 +1069,31 @@ this.**
 produces no truncation or overflow warnings, so every `snprintf` destination is
 provably large enough for the widest output its format can produce. A fresh
 ASan + UBSan build was then swept over the whole corpus again, 168 files
-through each program: **0 findings**.
+through each program — **336 runs, 0 findings**: no ASan report, no UBSan
+report, no signal, no unexpected exit status.
 
-That zero is not vacuous. The sweep binaries are genuinely instrumented
-(`__asan_init` and the UBSan handlers are linked in), the harness reports
-`# scanned 168 files` for each program, and a positive control confirms the
-same harness and environment still detect a real defect — re-running the
-pre-fix instrumented build on `wang/wang.in` reports
-`giv_select.c:152: signed integer overflow` as it always did, while the fixed
-build on the same input reports nothing.
+Establishing that this zero is not vacuous took three separate checks, because
+an earlier version of this very claim *was* vacuous and had to be retracted
+(see the ⚠️ Correction in "How the survey was done"):
+
+1. **The tree was built from sources only** — `git archive HEAD` into an empty
+   directory, then `make clean` — never by copying a built tree. That copying
+   is what silently defeated the first three sweeps, because `make` saw the
+   library objects as up to date and never recompiled them with the flags.
+2. **Instrumentation was verified per object, not per binary.** 137 of 137
+   compile lines carry `-fsanitize`, and all 77 members of `libladr.a`
+   reference `__asan`. Checking the binary for `__asan_init` — which is what
+   the retracted claim relied on — proves only that the runtime was linked,
+   and says nothing about which objects were compiled with the flags.
+3. **The positive control covers the code the claim is about.** `ladr/dollar.c`
+   was reverted to its pre-fix state, with nothing else changed, and the tree
+   rebuilt: that binary reports `ERROR: AddressSanitizer: heap-buffer-overflow`
+   on the M7 input while the shipped binary is clean on it. The earlier control
+   used a `giv_select.c` defect in `provers.src`, one of the directories that
+   *had* been instrumented, so it passed while the library went unchecked.
+
+Run against the instrumented build, the regression suite reports 27 of 27
+passing, the M7 test included; on a plain build that test reports SKIP.
 
 The programs built on top of the libraries were also checked directly, since
 the corpus sweep drives only `prover9` and `mace4`: `prooftrans` and
@@ -1083,11 +1104,14 @@ Mace4's model printer is clean at domain sizes 4, 10, 11 and 12 — the sizes
 either side of the `n <= 10` formatting switch in `print.c` that S1 and F2
 touched.
 
-**7. Regression suite.** `test.src/regress.sh` — 26 tests, all passing on the
-fixed tree, 21 of them failing on the baseline. The 5 that pass on both are the
-deliberate "must not regress" controls (a complete proof still transforms
-correctly, in-range parm derivations still produce their old values, a default
-Prover9 run still finds its proof). The two D2 tests were also run against a
+**7. Regression suite.** `test.src/regress.sh` — 27 checks. One of them, the M7
+heap overflow, is observable only under a sanitizer, so on a plain build it
+reports SKIP and 26 run: all 26 pass on the fixed tree and **21 of them fail on
+the baseline**. Against the instrumented build all 27 run and all 27 pass. The 5
+that pass on both sides are the deliberate "must not regress" controls (a
+complete proof still transforms correctly, in-range parm derivations still
+produce their old values, a default Prover9 run still finds its proof). The two
+D2 tests were also run against a
 build that carries every fix *except* D2, where they are the only two failures —
 so they test what they claim to and nothing else.
 
