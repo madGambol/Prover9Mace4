@@ -889,7 +889,7 @@ void read_all_input(int argc, char **argv, FILE *fout,
     for (i = n+1; i < argc; i++) {
       FILE *fin = fopen(argv[i], "r");
       if (fin == NULL) {
-	char s[1024];
+	char s[FILE_MESSAGE_SIZE];
 	snprintf(s, sizeof(s), "read_all_input, file %s not found", argv[i]);
 	fatal_error(s);
       }

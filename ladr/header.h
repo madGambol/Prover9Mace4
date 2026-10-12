@@ -39,4 +39,23 @@ typedef enum { FALSE=0, TRUE=1 } BOOL;
 
 #define INT_STRING_SIZE 12
 
+/* PATH_MAX is in <limits.h> on POSIX systems, but it is permitted to be
+   absent when the limit is indeterminate.  4096 is the Linux value and is a
+   sane floor elsewhere. */
+
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
+
+/* Bytes needed to hold a "file <name> not found"-style message, NUL included.
+   Every such message names a file that was just handed to fopen(), and no
+   path longer than PATH_MAX can be opened, so PATH_MAX bounds the longest
+   name worth reproducing in full.  Add 32 for the longest fixed text any of
+   those messages wraps around the name, then 20% margin.  All integer
+   arithmetic, so this stays an integer constant expression and can size an
+   array.  Use this when formatting a filename into a message, rather than
+   guessing: the name comes from input or argv, so a guess gets truncated. */
+
+#define FILE_MESSAGE_SIZE (((PATH_MAX + 32) * 6) / 5)
+
 #endif  /* conditional compilation of whole file */

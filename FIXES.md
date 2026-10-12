@@ -18,7 +18,7 @@ defaults to `-std=gnu23`.
 | B4 | `make` renames the mace4 binary over a missing `bin/` | 4 Makefiles | blocker |
 | M1 | Stack buffer overflow, `mace4 -n 10000000` **aborts** | `mace4.src/msearch.c:891` | memory safety |
 | M2 | Stack buffer overflow on a long input filename | `ladr/top_input.c:892` | memory safety |
-| M3 | Same, in 4 more programs | `prooftrans`, `directproof`, `interpformat`, `tptp_to_ladr` | memory safety |
+| M3 | Same, in 4 more programs — in `tptp_to_ladr` the name comes from a TPTP `include()`, so it is reachable from a problem file, not just the command line (**T1**) | `prooftrans`, `directproof`, `interpformat`, `tptp_to_ladr` | memory safety |
 | M4 | Two more unbounded message buffers | `ladr/termorder.c`, `ladr/options.c` | hardening |
 | M5 | Stack buffer overflow from `prooftrans -label`; **aborts** | `apps.src/prooftrans.c:481` | memory safety |
 | M6 | All 30 remaining `sprintf` → `snprintf`, buffers sized to the widest output; exposed a too-small buffer in `interp.c` | whole tree | memory safety |
@@ -36,6 +36,7 @@ defaults to `-std=gnu23`.
 | S1 | Spurious outer loop, correct only by accident | `mace4.src/print.c:107` | latent |
 | S2–S4 | `\|` for `\|\|`, `BOOL` holding a non-`BOOL` enum, pointer→`int` | `clash.c`, `paramod.c`, `flatdemod.c`, `avltree.c` | hygiene |
 | S5 | Arithmetic on `void *` in the allocator — a GCC extension, not standard C | `ladr/memory.c:58,78` | portability |
+| T2 | The five messages that report a filename were sized by a round number (1024), so a long name was reported truncated; now sized from `PATH_MAX` + 20% | `ladr/header.h`, 5 call sites | hardening |
 | PF1 | `String_buf` append is O(n²) | `ladr/strbuf.c` | performance |
 | X1–X5 | All 4 installed helper scripts are unrunnable | `utilities/` | broken tooling |
 | L1 | `demod1` drops a term its callee may have freed | `ladr/demod.c:376` | latent, reported only |
@@ -43,9 +44,9 @@ defaults to `-std=gnu23`.
 All fixed except **L1**, which is in a function with no callers anywhere in the
 tree and so cannot be validated; it is written up instead.
 
-New tests: `make -C test.src check` runs 27 regression tests — 26 on a plain
+New tests: `make -C test.src check` runs 32 regression tests — 31 on a plain
 build, since the M7 overflow is visible only under a sanitizer and that test
-reports SKIP rather than a meaningless PASS — of which 21 fail on the baseline
+reports SKIP rather than a meaningless PASS — of which 24 fail on the baseline
 (upstream with only the build fixes applied, since upstream alone does not
 compile). Plus a `String_buf` unit test and a Mace4 soundness check that
 independently verifies 271 reported models against their input clauses.
@@ -66,9 +67,10 @@ defect; see "Visible output change" under D1.
 | The check that was supposed to catch this — `nm` for `__asan_init` in the binary — is worthless for the purpose: linking the ASan runtime says nothing about which *objects* were instrumented. The positive control was equally misleading, because it used a `giv_select.c` defect, and `provers.src` was one of the directories that *did* get the flags. A control has to cover the code the claim is about. | lesson recorded rather than quietly fixed |
 | Rebuilt from `git archive` (sources only, no stale objects) plus `make clean`, then verified two ways before trusting any result: **137 of 137** compile lines carried `-fsanitize`, and **77 of 77** `libladr.a` objects reference `__asan` | finding **M7**, a heap buffer overflow in `ladr/dollar.c` reached by every production-mode example in the manual |
 | That corrected sweep, over the same 168 files per program, **before** the M7 fix | `prover9` **5 findings, all of them M7**; `mace4` **0 findings**; no UBSan findings. So the broken sweeps had concealed exactly one defect, not a collection |
-| The corrected sweep re-run on the finished tree (commit `96c8b5e`), 168 files × 2 programs = **336 instrumented runs** | **0 findings** — no ASan report, no UBSan report, no signal, no unexpected exit status. This is the number that replaces the retracted one above |
+| The corrected sweep re-run on the finished tree, 168 files × 2 programs = **336 instrumented runs**, repeated after each subsequent change | **0 findings** every time — no ASan report, no UBSan report, no signal, no unexpected exit status. This is the number that replaces the retracted one above. Run serially it took 61 minutes for `prover9` alone; at 24-way parallelism the whole 336 take 23 |
 | Positive control for *that* zero, on the same build: `ladr/dollar.c` reverted to its pre-fix state and nothing else, then rebuilt | the control binary reports `ERROR: AddressSanitizer: heap-buffer-overflow` on the M7 input; the shipped binary is clean on it. A defect in `ladr/` would have been seen, which is the claim the earlier control failed to establish |
-| Full regression suite run *against the instrumented build* rather than a plain one | **27 of 27 pass**, including the sanitizer-gated M7 test that reports SKIP on a plain build |
+| Full regression suite run *against the instrumented build* rather than a plain one | **32 of 32 pass**, including the sanitizer-gated M7 test that reports SKIP on a plain build |
+| After deleting upstream's 83 unbuilt backup files, the instrumented build still compiles **137 of 137** files — the same count as before | direct evidence that nothing load-bearing was removed: the set of compiled translation units is unchanged |
 | 350 rounds of mutational fuzzing of both parsers | 0 new memory errors — only the same `giv_select` overflow |
 | Targeted review of every `sprintf`, format-string, `strlen()` index, `double`→`int` conversion, and loop-variable reuse | findings M1–M4, F1–F2, D1, U3, S1 |
 | Line-by-line review of the committed diff, then malformed-input fuzzing of `prooftrans`/`directproof` (34 inputs × 2 tools × 6 formats = 408 runs under ASan+UBSan) | finding **D2**, which the corpus sweep could not reach: it drives only `prover9` and `mace4`, and the earlier targeted app checks used well-formed proofs |
@@ -352,13 +354,13 @@ A new constant documents the one recurring quantity:
 #define INT_STRING_SIZE 12
 ```
 
-18 of the 30 are in the compiled programs. The other 12 are in `ladr/save/`,
-`bob/` and `provers.src/save/` — stale duplicate sources that upstream shipped
-but that no Makefile references (`ladr/save/just.c` still carries the old
-`jmap2(Ilist, ...)` signature). Those were converted for consistency so that
-`grep sprintf` over the tree comes back empty, but **they are not compiled, so
-unlike everything else in this document those twelve edits are not exercised by
-any build or test.**
+18 of the 30 were in the compiled programs. The other 12 were in `ladr/save/`,
+`bob/` and `provers.src/save/` — upstream's own in-tree backups, which no
+Makefile references. Converting those was a mistake: it edited dead code to
+make `grep sprintf` come back empty, which is a cosmetic goal, and it produced
+twelve changes that no build or test could exercise. Those directories have
+since been deleted outright (see "Removed: upstream's in-tree backups"), which
+disposes of the twelve edits along with them. The 18 that matter are unaffected.
 
 Two functions write into a buffer their caller owns, which `sprintf` gave them
 no way to bound. Both now take the size, so the compiler checks every call
@@ -582,8 +584,71 @@ still needs to be fuzzed with input that violates that format.
 
 Two further `scanf` sites were checked and left alone: `ladr/dioph.c` is inside
 `#ifdef SOLO` and reads `%d`, and `apps.src/old/modelformat.c` is not compiled.
-`bob/prooftrans.c` has the same three unfixed sites but is a stale duplicate
-that no Makefile references (see the note at the end of this document).
+(`bob/prooftrans.c` had the same three unfixed sites, but that directory has
+since been deleted — see "Removed: upstream's in-tree backups".)
+
+### T1 — buffer overflow on a long filename, reachable from a TPTP file
+
+`provers.src/tptp_to_ladr.c` formatted the name of a missing `include()` file
+into `char s[100]`:
+
+```c
+fin2 = fopen(fname2, "r");
+if (fin2 == NULL) {
+  char s[100];
+  sprintf(s, "read_tptp_input, file %s not found", fname2);   /* unbounded */
+  fatal_error(s);
+}
+```
+
+`fname2` comes straight out of the input file, so any TPTP problem containing
+`include('<400 characters>')` overflows it. Upstream aborts with glibc's
+`*** buffer overflow detected ***`, exit 134.
+
+This is the same shape as M2/M3 and was fixed in the same pass, but it is worth
+separating out, because of **where** it lives. `tptp_to_ladr` and `ladr_to_tptp`
+are two of the 40 programs `make all` installs, and *nothing* in upstream —
+`make test1`, `test2`, `test3`, or any file in `test.src/` — ever runs either
+one. The defect was therefore fixed without a single test touching the program
+it was in. That gap is now closed: `regress.sh` drives a TPTP problem through
+`tptp_to_ladr`, proves the translation with `prover9`, and translates it back
+with `ladr_to_tptp`.
+
+### T2 — the filename buffers were big enough to be safe, but not to be useful
+
+The fix above, and the four sibling sites that format a filename into a
+message, used `char s[1024]` with `snprintf`. That is safe — `snprintf`
+truncates rather than overflowing — but 1024 is a round number rather than a
+reasoned one, and a name longer than about a kilobyte came back cut off in the
+middle, which is exactly when a user most needs to see the whole thing.
+
+Every one of these messages names a file that was just passed to `fopen()`, and
+no path longer than `PATH_MAX` can be opened, so `PATH_MAX` is the real bound on
+the longest name worth reproducing in full. The five sites now share one size
+derived from that, rather than five copies of a guess:
+
+```c
+/* ladr/header.h */
+#define FILE_MESSAGE_SIZE (((PATH_MAX + 32) * 6) / 5)
+```
+
+`PATH_MAX` (4096 on Linux, with a fallback for systems that leave it
+undefined), plus 32 for the longest fixed text any of the messages wraps around
+the name, plus 20% margin — 4953 bytes, all integer arithmetic so it remains an
+integer constant expression and can size an array. `fatal_error` itself has no
+buffer, it just `fprintf`s what it is handed, so the larger size genuinely
+reaches the output.
+
+Measured: a 4000-character filename is now reproduced whole where it was
+previously cut at the buffer. Two `regress.sh` tests pin this, and both match
+the entire message rather than just the name — the first version of the
+`prover9` check grepped only for the name and **passed against the unfixed
+baseline**, because prover9's banner echoes `argv` before it ever gets to the
+error message.
+
+The remaining five sites are the ones that format a filename. Buffers elsewhere
+in the tree are sized by their own content, and the
+`-Wformat-truncation=2 -Wformat-overflow=2` rebuild still reports nothing.
 
 ---
 
@@ -1104,13 +1169,14 @@ Mace4's model printer is clean at domain sizes 4, 10, 11 and 12 — the sizes
 either side of the `n <= 10` formatting switch in `print.c` that S1 and F2
 touched.
 
-**7. Regression suite.** `test.src/regress.sh` — 27 checks. One of them, the M7
+**7. Regression suite.** `test.src/regress.sh` — 32 checks. One of them, the M7
 heap overflow, is observable only under a sanitizer, so on a plain build it
-reports SKIP and 26 run: all 26 pass on the fixed tree and **21 of them fail on
-the baseline**. Against the instrumented build all 27 run and all 27 pass. The 5
+reports SKIP and 31 run: all 31 pass on the fixed tree and **24 of them fail on
+the baseline**. Against the instrumented build all 32 run and all 32 pass. The 7
 that pass on both sides are the deliberate "must not regress" controls (a
 complete proof still transforms correctly, in-range parm derivations still
-produce their old values, a default Prover9 run still finds its proof). The two
+produce their old values, a default Prover9 run still finds its proof, a TPTP
+problem still translates and proves and translates back). The two
 D2 tests were also run against a
 build that carries every fix *except* D2, where they are the only two failures —
 so they test what they claim to and nothing else.
@@ -1132,3 +1198,61 @@ Only where the old code's behaviour was undefined or absent:
 
 Everything else is a build fix, a buffer-size change on an error-reporting
 path, or a semantics-preserving rewrite.
+
+---
+
+## Removed: upstream's in-tree backups
+
+The tarball ships 83 files that nothing builds. They are version control done
+by hand, from before the project was in a repository, and the naming makes the
+intent plain:
+
+| Where | What | Last touched |
+| --- | --- | --- |
+| `ladr/save/` | 44 files: whole old copies of `clause.c`, `commands.c`, `sos.c`, `detach.c`, `weight1.c`, `read_tptp_file.c`; plus `sos.c.old`, `detach.h.bak`, `sos.h~`, `cnf.c.alarm`, and a 2004 `detach.o` | 2004–2007 |
+| `provers.src/save/` | 20 files, same pattern: `auto.c`, `picker.c`, `poptions.c`, `ploop4.c`, `prover9-simple.c` | 2004–2008 |
+| `mace4.src/save/` | 2 files: `raw-cooked` and `raw-cooked~` | 2005 |
+| `bob/` | 5 files: a contributor's patch directory | 2007–2008 |
+| live source dirs | 12 loose `.c~`, `.h.bak`, `.c.work`, `.py~`, `.in~` files sitting among the real sources, including `memory.c~` and `tptp_trans.c~` | 2004–2009 |
+
+Several files in the `save/` directories have no `.c` extension at all —
+`lex_compare`, `printing`, `goals_to_denials`, `str_toupper`,
+`interp_remove_skolems`, `fork_and_wait` — and each contains exactly one
+function, under that function's own name, complete with its `/* DOCUMENTATION
+*/` block. They are individual routines cut out of the live sources and kept
+by hand in case they were wanted back.
+
+Nothing was load-bearing, and each case was checked rather than assumed:
+
+- No `Makefile`, script or test in the tree names any of them.
+- Every `save/` file either duplicates a live source or holds a function that
+  no longer exists. The `~`/`.bak`/`.work` files in the live directories are
+  older copies of files beside them, and no `Makefile` names those either —
+  `.c~` and `.c.work` do not match a `%.c` rule.
+- `bob/` is Bob Veroff's working directory for the tagged-proof contribution,
+  dated 2007-aug-20 in its own `ChangelogBV`. **That feature was merged**:
+  `apps.src/prooftrans.c:277` still carries his `/* BV(2007-aug-20) */` marker,
+  `ladr/ioutil.h` declares `sb_tagged_write_clause_jmap()`, and
+  `prooftrans tagged` works. The directory is the superseded staging copy.
+- `ladr/save/read_tptp_file.c` is the one with any claim to interest: an
+  earlier in-library TPTP reader, replaced by `ladr/tptp_trans.c` plus the two
+  translator programs, which are built and now tested.
+
+Deleting them is reversible and loses nothing: the first commit in this
+repository is the untouched tarball, so
+
+```sh
+git show 25b4505:ladr/save/sos.c          # any single file
+git checkout 25b4505 -- ladr/save bob provers.src/save mace4.src/save
+```
+
+still produce the originals.
+
+**Kept deliberately:** `ladr/Changelog.old` and `mace4.src/Changelog.old`. The
+`.old` suffix makes them look like more of the same, but they are not backups
+of anything — they are the only surviving record of LADR's early history, and
+they end by pointing at the file that continues it ("Further changes are listed
+in the LADR Changelog file (`../Changelog`)"). `ladr/Changelog.old` is also
+where the TPTP relationship first appears: *"May 18, 2004. Soundness bug from
+Geoff Sutcliffe. CNF transformation... Since this is a serious bug, a new
+release will be made today."*

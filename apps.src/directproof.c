@@ -678,7 +678,7 @@ int main(int argc, char **argv)
     filename = argv[n+1];
     fin = fopen(filename, "r");
     if (fin == NULL) {
-      char s[1024];
+      char s[FILE_MESSAGE_SIZE];
       snprintf(s, sizeof(s), "file %s not found", argv[n+1]);
       fatal_error(s);
     }

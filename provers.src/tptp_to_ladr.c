@@ -46,7 +46,7 @@ void read_tptp_input(FILE *fin, FILE *fout, FILE *ferr,
       }
       fin2 = fopen(fname2, "r");
       if (fin2 == NULL) {
-	char s[1024];
+	char s[FILE_MESSAGE_SIZE];
 	snprintf(s, sizeof(s), "read_tptp_input, file %s not found", fname2);
 	fatal_error(s);
       }

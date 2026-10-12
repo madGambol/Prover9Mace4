@@ -98,6 +98,45 @@ chk_san "M7  production mode heap overflow in dollar.c" \
     '! ASAN_OPTIONS=detect_leaks=0 timeout 60 "$B/prover9" -f "$W/prod.in" 2>&1 \
        | grep -q "AddressSanitizer"'
 
+# T1: tptp_to_ladr formatted a missing include() filename into char s[100],
+# so a TPTP problem whose include() names a long file aborted the translator
+# (glibc: "*** buffer overflow detected ***", exit 134).  The filename comes
+# straight from the input file, so this is reachable from any TPTP problem.
+# Nothing upstream exercises either TPTP translator, hence this test.
+printf "include('%s').\nfof(a,axiom,p(x)).\n" "$LONG" > "$W/longinc.p"
+chk "T1  tptp_to_ladr long include() filename (overflow)" \
+    'timeout 30 "$B/tptp_to_ladr" < "$W/longinc.p" 2>&1 | grep -q "not found"'
+
+# T2: the messages that name a file are sized from PATH_MAX, not from a round
+# number, so the name is reported in full instead of being truncated at the
+# buffer.  A 4000-character name fits inside PATH_MAX and must come back whole;
+# this fails against a 1024-byte buffer, which truncates it.
+LONG4000=$(awk 'BEGIN{s="";while(length(s)<4000)s=s "yyyyyyyyyy";print substr(s,1,4000)}')
+printf "include('%s').\nfof(a,axiom,p(x)).\n" "$LONG4000" > "$W/inc4000.p"
+# Both checks match the whole message, not just the name: prover9's banner
+# echoes argv, so grepping for the name alone passes even on a build whose
+# error message is truncated or which never gets as far as printing one.
+chk "T2  a 4000-char filename is reported in full, not truncated" \
+    'timeout 30 "$B/tptp_to_ladr" < "$W/inc4000.p" 2>&1 \
+       | grep -q "file $LONG4000 not found"'
+chk "T2  prover9 likewise reports a long -f name in full" \
+    'timeout 30 "$B/prover9" -f "$LONG4000" 2>&1 \
+       | grep -q "read_all_input, file $LONG4000 not found"'
+
+# T   ...and the translators must still do their job: a TPTP problem has to
+# survive translation well enough for prover9 to prove it, and come back.
+cat > "$W/grp.p" <<'TPTP'
+fof(assoc, axiom, ! [X,Y,Z] : mult(mult(X,Y),Z) = mult(X,mult(Y,Z))).
+fof(ident_l, axiom, ! [X] : mult(e,X) = X).
+fof(inv_l, axiom, ! [X] : mult(X,X) = e).
+fof(abelian, conjecture, ! [A,B] : mult(A,B) = mult(B,A)).
+TPTP
+chk "T   tptp_to_ladr output proves under prover9" \
+    'timeout 60 "$B/tptp_to_ladr" < "$W/grp.p" > "$W/grp.in" 2>/dev/null \
+       && timeout 60 "$B/prover9" -f "$W/grp.in" 2>&1 | grep -q "THEOREM PROVED"'
+chk "T   ladr_to_tptp round-trips it back to fof()" \
+    'timeout 60 "$B/ladr_to_tptp" < "$W/grp.in" 2>/dev/null | grep -q "^fof(goals,conjecture"'
+
 # N1/N2/N3: derived parm values that used to abort the program.
 chk "N1  assign(max_minutes,-1) accepted" \
     '! opt "assign(max_minutes,-1)." | grep -q "Fatal error"'

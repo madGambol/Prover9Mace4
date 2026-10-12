@@ -44,27 +44,27 @@ the original source. No configure step, no dependencies beyond libc and libm.
 make -C test.src check
 ```
 
-runs the test suite added here: 27 regression tests, a `String_buf` unit test,
+runs the test suite added here: 32 regression tests, a `String_buf` unit test,
 and a Mace4 soundness check that independently re-verifies 271 reported models
 against their input clauses using `interpformat` and `clausetester`.
 
 Each regression test is written to fail against the original code and pass
 after the fix, so the suite measures the fixes rather than just exercising the
 programs. Run against a baseline tree — upstream with *only* the three build
-fixes applied, since upstream alone does not compile — **21 of the 26 fail**.
-The 5 that pass on both sides are deliberate "must not regress" controls.
+fixes applied, since upstream alone does not compile — **24 of the 31 fail**.
+The 7 that pass on both sides are deliberate "must not regress" controls.
 
 One test, for the M7 heap overflow, can only be observed under a sanitizer;
 on an ordinary build it reports SKIP rather than a meaningless PASS, which is
-why the plain-build count is 26 of 27. Given a sanitizer build — pass its
-`bin` directory as an argument — all 27 run and pass.
+why the plain-build count is 31 of 32. Given a sanitizer build — pass its
+`bin` directory as an argument — all 32 run and pass.
 
 ## What was fixed
 
 | | |
 | --- | --- |
 | **Build blockers** | K&R function definitions and implicit `int`, both hard errors under C23; `-lm` placed before the objects that need it; `make` renaming a binary over a directory that does not exist yet |
-| **Memory safety** | Four stack buffer overflows reachable from input or the command line (Mace4's domain-size banner, long input filenames, `prooftrans -label`, and an unbounded `fscanf("%s")` in the proof reader); a heap buffer overflow on every `set(production)` run, which every production-mode example in the manual triggers; an uncontrolled format string that segfaults on input containing `%n`; every `sprintf` in the tree converted to `snprintf` with each buffer sized to its format's widest output |
+| **Memory safety** | Five stack buffer overflows reachable from input or the command line (Mace4's domain-size banner, long input filenames, a long `include()` filename in a TPTP problem, `prooftrans -label`, and an unbounded `fscanf("%s")` in the proof reader); a heap buffer overflow on every `set(production)` run, which every production-mode example in the manual triggers; an uncontrolled format string that segfaults on input containing `%n`; every `sprintf` in the tree converted to `snprintf` with each buffer sized to its format's widest output, and the five messages that report a filename now sized from `PATH_MAX` so a long name is reported in full rather than truncated |
 | **Undefined behaviour** | Signed integer overflow in Prover9's given-clause selection, hit on *every* default run; a second instance where the overflowed value is actually used; an out-of-range `double`→`int` conversion that silently defeated `sos_limit` |
 | **Hangs and crashes** | `prooftrans` and `directproof` looped forever, then dereferenced NULL, on a truncated proof |
 | **Usability** | `assign(max_minutes,-1)`, `assign(max_minutes,50000000)` and `assign(pick_given_ratio,-1)` all aborted the prover on legal input |
@@ -129,13 +129,19 @@ as a base to audit.
 This is a maintenance tree, not a fork that intends to diverge. It does not
 add features, change the input language, or alter the proof or model formats.
 
-Known and deliberately left alone, both documented in `FIXES.md`:
+Known and deliberately left alone, documented in `FIXES.md`:
 
 - **L1** — `ladr/demod.c:376` discards a term its callee may have freed. It is
   reported but not fixed: the function has no callers anywhere in the tree, so
   a change to it could not be validated.
-- `ladr/save/`, `bob/` and `provers.src/save/` are stale duplicate sources that
-  no Makefile references. They are not compiled and no test exercises them.
+
+One thing *was* removed rather than fixed. Upstream shipped its own working
+backups in the source tree — three `save/` directories, a contributor's patch
+directory, and a dozen `.c~` / `.bak` / `.work` files sitting among the live
+sources — holding 83 files that no Makefile references, last touched between
+2004 and 2008. They are deleted here; `git show 25b4505` still has every one of
+them, since the first commit is the untouched tarball. See "Removed: upstream's
+in-tree backups" in `FIXES.md` for what they were and why none was load-bearing.
 
 ## Licence
 
