@@ -134,6 +134,12 @@ Known and deliberately left alone, documented in `FIXES.md`:
 - **L1** — `ladr/demod.c:376` discards a term its callee may have freed. It is
   reported but not fixed: the function has no callers anywhere in the tree, so
   a change to it could not be validated.
+- `test.src/tptp_test.c` — upstream's own TPTP test, which has not compiled for
+  years: it calls three library functions that no longer exist. It is excluded
+  from its Makefile's `PROGRAMS` list, so nothing ever built it and nothing
+  noticed. Repairing it would mean writing the missing functions, which is new
+  code rather than a fix, and the coverage it was written for now exists in
+  `regress.sh` against the installed translators.
 
 One thing *was* removed rather than fixed. Upstream shipped its own working
 backups in the source tree — three `save/` directories, a contributor's patch

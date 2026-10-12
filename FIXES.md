@@ -639,6 +639,34 @@ it was in. That gap is now closed: `regress.sh` drives a TPTP problem through
 `tptp_to_ladr`, proves the translation with `prover9`, and translates it back
 with `ladr_to_tptp`.
 
+**Upstream did write a TPTP test, and it has not compiled for years.**
+`test.src/tptp_test.c` reads a TPTP file and prints the formulas it parsed —
+exactly the coverage that was missing. It has its own rule in
+`test.src/Makefile`, but it is absent from that file's `PROGRAMS` list
+(`avltest strbuf_test`), so neither `make all` nor `make check` builds it, and
+nothing noticed as the library moved out from under it. It calls three
+functions that exist nowhere in the tree — not in `ladr/`, not in any header,
+0 definitions and 0 declarations each:
+
+| Called by `tptp_test.c` | Status |
+| --- | --- |
+| `declare_tptp_parse_types()` | renamed; it is `declare_tptp_input_types()` now |
+| `tptp_formula()` | gone; formula conversion is `tptp_input_to_ladr_formula()` |
+| `read_tptp_file(stdin)` | gone; reading moved into the translator programs |
+
+`make -C test.src tptp_test` fails with four hard errors under C23, and fails
+**identically on the baseline tree**, so this is upstream rot rather than
+anything the changes here caused. The deleted `ladr/save/read_tptp_file.c` is
+not the missing piece either: it was never compiled, and its signature
+(`FILE *, FILE *, BOOL, int`, returning `void`) does not match the one-argument
+call returning `Plist` that the test makes. The test, the saved copy and the
+shipped library are three different generations of the same API.
+
+It is left in place and unrepaired. Repairing it would mean writing the two
+missing functions, which is new code rather than a fix, and the coverage it was
+for now exists in `regress.sh` against the programs that are actually
+installed.
+
 ### T2 — the filename buffers were big enough to be safe, but not to be useful
 
 The fix above, and the four sibling sites that format a filename into a
