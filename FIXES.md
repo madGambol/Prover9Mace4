@@ -37,6 +37,7 @@ defaults to `-std=gnu23`.
 | S2–S4 | `\|` for `\|\|`, `BOOL` holding a non-`BOOL` enum, pointer→`int` | `clash.c`, `paramod.c`, `flatdemod.c`, `avltree.c` | hygiene |
 | S5 | Arithmetic on `void *` in the allocator — a GCC extension, not standard C | `ladr/memory.c:58,78` | portability |
 | T2 | The five messages that report a filename were sized by a round number (1024), so a long name was reported truncated; sized from `PATH_MAX` + 20% | `ladr/header.h`, 5 call sites | hardening |
+| M8 | **Use-after-free in `zap_flatterm`, on every call** — the loop test re-reads `f->end` after the first iteration has freed `f`. Hit by the default prover9 run; invisible to valgrind and ASan because the block goes to an avail list, not to libc | `ladr/flatterm.c:152` | memory safety |
 | T3 | ...and that put a 4953-byte array in five frames, one of them recursive, cutting circular-`include()` depth from 40262 to 1651. The message is now measured with `snprintf(NULL,0,...)` and allocated to fit: no array, no truncation at any length, depth 87255 | `ladr/fatal.c`, 5 call sites | hardening |
 | PF1 | `String_buf` append is O(n²) | `ladr/strbuf.c` | performance |
 | X1–X5 | All 4 installed helper scripts are unrunnable | `utilities/` | broken tooling |
@@ -72,6 +73,9 @@ defect; see "Visible output change" under D1.
 | Positive control for *that* zero, on the same build: `ladr/dollar.c` reverted to its pre-fix state and nothing else, then rebuilt | the control binary reports `ERROR: AddressSanitizer: heap-buffer-overflow` on the M7 input; the shipped binary is clean on it. A defect in `ladr/` would have been seen, which is the claim the earlier control failed to establish |
 | Full regression suite run *against the instrumented build* rather than a plain one | **32 of 32 pass**, including the sanitizer-gated M7 test that reports SKIP on a plain build |
 | After deleting upstream's 83 unbuilt backup files, the instrumented build still compiles **137 of 137** files — the same count as before | direct evidence that nothing load-bearing was removed: the set of compiled translation units is unchanged |
+| Valgrind memcheck with `--track-origins=yes` over the corpus, 168 files × 2 programs, on the **shipped** binaries with no instrumented build | **0 memory errors** in 336 runs: no invalid access, no use of uninitialised memory, no bad free. This is the first check of uninitialised memory in the project — ASan does not detect it, and MSan would need every dependency including libc rebuilt |
+| The same sweep with leak checking, which the ASan sweeps had switched off (`detect_leaks=0`) | **96 leaks, all in `mace4`**, `prover9` clean on all 168: 32 bytes per run from `mace4()`'s `malloc(sizeof(struct mace_results))`, which `mace4.c` and `mprover.c` never free, plus one 6,416-byte case. Reported, not fixed: the struct is leaked once immediately before the process exits |
+| ⚠️ **The limit of both tools here.** `free_mem()` returns a block to libc only when it is 500 pointers or more; every term, clause and literal goes onto the `M[n]` avail list instead and stays owned by the process. Valgrind and ASan therefore see reused LADR objects as live and valid, and cannot report a use-after-free of one | the clean use-after-free result above covers blocks ≥ 4000 bytes and the 56 direct `free()` calls — **not** LADR's own recycling. Closing that gap with `-DPOISON_FREED_MEM` found **M8** immediately |
 | 350 rounds of mutational fuzzing of both parsers | 0 new memory errors — only the same `giv_select` overflow |
 | Targeted review of every `sprintf`, format-string, `strlen()` index, `double`→`int` conversion, and loop-variable reuse | findings M1–M4, F1–F2, D1, U3, S1 |
 | Line-by-line review of the committed diff, then malformed-input fuzzing of `prooftrans`/`directproof` (34 inputs × 2 tools × 6 formats = 408 runs under ASan+UBSan) | finding **D2**, which the corpus sweep could not reach: it drives only `prover9` and `mace4`, and the earlier targeted app checks used well-formed proofs |
@@ -696,6 +700,95 @@ Two `regress.sh` tests pin this, and both match the entire message rather than
 just the name — the first version of the `prover9` check grepped only for the
 name and **passed against the unfixed baseline**, because prover9's banner
 echoes `argv` before it ever gets to the error message.
+
+### M8 — use-after-free in `zap_flatterm`, on every call
+
+Found by poisoning LADR's own allocator, which is the only thing that can see
+it. The loop was:
+
+```c
+Flatterm fi = f;
+while (fi != f->end->next) {     /* re-evaluated every iteration */
+  Flatterm tmp = fi;
+  fi = fi->next;
+  free_flatterm(tmp);            /* the first iteration frees f itself */
+}
+```
+
+The first pass frees `f`, and every subsequent evaluation of the test reads
+`f->end`, then `f->end->next`, through a block that has already been released.
+The fix hoists the stopping point out of the loop, so the same expression is
+evaluated once while `f` is still valid.
+
+**Why no tool saw it.** `free_flatterm()` ends in `free_mem()`, and `free_mem()`
+only hands a block back to libc when it holds `MAX_MEM_LISTS` (500) pointers or
+more — 4000 bytes. Anything smaller, which is every term, clause and literal,
+is linked onto the `M[n]` avail list and stays owned by the process. To valgrind
+and to ASan that memory is live and validly addressable, so reusing it is not an
+error they can report; the freed flatterm simply keeps its contents until
+something else claims the slot. A custom pool allocator makes both tools blind
+in exactly the region where the bugs live. In this tree that is 56 of the 57
+`free()` calls' worth of objects.
+
+**What makes it visible.** `ladr/memory.c` now takes `-DPOISON_FREED_MEM`, which
+fills a block with `0xdeadbeefdeadbeef` as it goes onto the avail list, leaving
+only the first pointer, which is the list link. The pattern is non-canonical as
+an x86-64 address, so a dereference faults at once instead of happening to work.
+Off by default: `free_mem()` is a hot path, which is why `mega_mem_calls()`
+exists to count the millions of calls a search makes.
+
+With it on, the defect is immediate and unambiguous:
+
+```
+Invalid read of size 8
+   at zap_flatterm (flatterm.c:152)
+   by fdemodulate (flatdemod.c:408)
+   by fdemod_clause (flatdemod.c:483)
+   by demodulate_clause (demodulate.c:150)
+   by cl_process_simplify (search.c:1155)
+   by index_and_process_initial_clauses (search.c:2432)
+ Address 0xdeadbeefdeadbeff is not stack'd, malloc'd or (recently) free'd
+```
+
+The faulting address is the poison plus 16, and `next` sits at offset 16 — the
+loop read `f->end->next` with `f->end` already poisoned.
+
+**Evidence, in the order it was gathered.**
+
+| Check | Result |
+| --- | --- |
+| Poisoned build, before the fix, `prover9 -f prover9.examples/x2.in` | SIGSEGV; `make test1` fails |
+| Same tree, same flags, **only this loop reverted** vs. fixed | `SIGSEGV` vs. `THEOREM PROVED` — the one line carries the whole effect |
+| Poisoned build, after the fix, corpus sweep 168 files × 2 programs | **336 runs, 0 crashes** |
+| Poisoned build, after the fix, full regression suite | **31 of 31 pass** — this is what covers `prooftrans`, `directproof`, the TPTP translators and the helper scripts, which the corpus sweep never drives |
+| Behaviour preservation, before vs. after, over the corpus | 0 differences — see the note on noise below |
+
+**A note on measuring that last row**, because the first two attempts were
+worthless. The naive A/B reported 336 of 336 differing; the cause was the banner
+line `The command was "..."`, which echoes each binary's own path — the same line
+that had already made a draft T2 test pass against the unfixed baseline. With
+that filtered, 154 of 336 differed, which still proves nothing: running the
+*same* binary against itself differed on 172 of 336, because at 80-way
+parallelism the problems that stop on a wall-clock limit do a different amount of
+work each time. Two self-comparison passes identified 162 runs that are
+deterministic, and over those the before/after comparison differs on **0 of 162**.
+A control that reports more differences than the thing being measured is the
+only reason that number means anything.
+
+**Are there others like it?** A detector that looks for loops whose test
+dereferences a pointer the body frees, following simple assignment aliases into
+the enclosing scope, reports two candidates besides this one:
+`match_bt_backup` (`ladr/btm.c:892`) and its duplicate `unify_bt_backup`
+(`ladr/btu.c:990`). Both are safe: they do `bt1 = bt1->parent` *before* freeing
+the sibling chain, so the test only ever reads the live parent. The detector
+flags them because its alias tracking has no flow sensitivity.
+
+That list is worth only as much as the detector, so it was calibrated against
+the known answer first: an earlier version found 0 candidates and would have
+missed this very bug, because the condition dereferences `f` while the body
+frees `tmp`, two assignments away. The version used here is self-tested — it is
+run against the pre-fix `flatterm.c` and must report line 152 before its output
+on the current tree is trusted.
 
 ### T3 — and then the buffers stopped being buffers
 

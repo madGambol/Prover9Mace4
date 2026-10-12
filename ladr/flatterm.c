@@ -149,9 +149,21 @@ BOOL flatterm_ident(Flatterm a, Flatterm b)
 void zap_flatterm(Flatterm f)
 {
   Flatterm fi = f;
-  while (fi != f->end->next) {
+
+  /* The first iteration frees f itself, so the loop's stopping point has to
+     be read now: testing "fi != f->end->next" inside the loop dereferences f,
+     and then f->end, after both have been released.  That is a use-after-free
+     on every call.  It went unnoticed because free_flatterm() returns the
+     block to one of memory.c's avail lists rather than to libc, so the freed
+     flatterm keeps its contents until something reuses it -- which neither
+     valgrind nor ASan can see, as the memory is still owned by the process.
+     Building with -DPOISON_FREED_MEM makes it a prompt segfault instead. */
+
+  Flatterm stop = f->end->next;
+
+  while (fi != stop) {
     Flatterm tmp = fi;
-    fi = fi->next;
+    fi = fi->next;        /* read before tmp is freed */
     free_flatterm(tmp);
   }
 }  /* zap_flatterm */

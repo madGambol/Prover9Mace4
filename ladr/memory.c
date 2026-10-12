@@ -43,6 +43,29 @@ static char *Block_pos = NULL;    /* current position in block */
 static unsigned Mem_calls = 0;
 static unsigned Mem_calls_overflows = 0;
 
+/* Poisoning blocks on their way to the avail lists.
+
+   free_mem() does not hand a small block back to libc -- it links it onto
+   M[n] -- so a use-after-free of a term, clause or literal is invisible both
+   to valgrind and to ASan: from their point of view that memory is still
+   live and validly owned by the process, and reusing it is quietly blessed.
+   Only blocks of MAX_MEM_LISTS pointers or more reach free(), where a tool
+   can see the mistake.
+
+   Filling the block as it is released makes the mistake visible without any
+   tool: POISON is non-canonical as an x86-64 address, so dereferencing a
+   poisoned pointer faults immediately instead of happening to work, and the
+   pattern is conspicuous in a debugger when read as an integer or a double.
+
+   Off by default, because free_mem() is a hot path -- a search makes millions
+   of these calls, which is why mega_mem_calls() exists to count them.  Build
+   with -DPOISON_FREED_MEM to turn it on.  The first pointer of the block is
+   deliberately left alone: it is the avail-list link. */
+
+#ifdef POISON_FREED_MEM
+#define POISON ((void *) 0xdeadbeefdeadbeefUL)
+#endif
+
 #define BUMP_MEM_CALLS {Mem_calls++; if (Mem_calls==0) Mem_calls_overflows++;}
 
 /*************
@@ -180,6 +203,12 @@ void free_mem(void *q, unsigned n)
     if (n >= MAX_MEM_LISTS)
       free(p);
     else {
+#ifdef POISON_FREED_MEM
+      /* Everything but the avail-list link; see POISON above. */
+      unsigned i;
+      for (i = 1; i < n; i++)
+	p[i] = POISON;
+#endif
       /* the first pointer is used for the avail list */
       *p = M[n];
       M[n] = p;
