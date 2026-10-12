@@ -36,6 +36,8 @@ defaults to `-std=gnu23`.
 | S1 | Spurious outer loop, correct only by accident | `mace4.src/print.c:107` | latent |
 | S2–S4 | `\|` for `\|\|`, `BOOL` holding a non-`BOOL` enum, pointer→`int` | `clash.c`, `paramod.c`, `flatdemod.c`, `avltree.c` | hygiene |
 | S5 | Arithmetic on `void *` in the allocator — a GCC extension, not standard C | `ladr/memory.c:58,78` | portability |
+| **T4** | **Wrong answers from `tptp_to_ladr`: the negation of a quantified formula was silently dropped.** `~ ! [X] : p(X)` translated to `p(X)` — the opposite of the input. 1,930 of the 17,912 first-order TPTP v9.3.1 problems contain the shape | `ladr/tptp_trans.c:398` | **wrong results** |
+| T5 | `tptp_to_ladr` emitted single-quoted TPTP formula names into `label(...)`, which LADR's own reader rejects, so the translator produced files its own prover could not read. 382 problems affected | `ladr/tptp_trans.c:437` | correctness |
 | T2 | The five messages that report a filename were sized by a round number (1024), so a long name was reported truncated; sized from `PATH_MAX` + 20% | `ladr/header.h`, 5 call sites | hardening |
 | M8 | **Use-after-free in `zap_flatterm`, on every call** — the loop test re-reads `f->end` after the first iteration has freed `f`. Hit by the default prover9 run; invisible to valgrind and ASan because the block goes to an avail list, not to libc | `ladr/flatterm.c:152` | memory safety |
 | T3 | ...and that put a 4953-byte array in five frames, one of them recursive, cutting circular-`include()` depth from 40262 to 1651. The message is now measured with `snprintf(NULL,0,...)` and allocated to fit: no array, no truncation at any length, depth 87255 | `ladr/fatal.c`, 5 call sites | hardening |
@@ -46,9 +48,9 @@ defaults to `-std=gnu23`.
 All fixed except **L1**, which is in a function with no callers anywhere in the
 tree and so cannot be validated; it is written up instead.
 
-New tests: `make -C test.src check` runs 32 regression tests — 31 on a plain
+New tests: `make -C test.src check` runs 35 regression tests — 34 on a plain
 build, since the M7 overflow is visible only under a sanitizer and that test
-reports SKIP rather than a meaningless PASS — of which 24 fail on the baseline
+reports SKIP rather than a meaningless PASS — of which 27 fail on the baseline
 (upstream with only the build fixes applied, since upstream alone does not
 compile). Plus a `String_buf` unit test and a Mace4 soundness check that
 independently verifies 271 reported models against their input clauses.
@@ -790,6 +792,87 @@ frees `tmp`, two assignments away. The version used here is self-tested — it i
 run against the pre-fix `flatterm.c` and must report line 152 before its output
 on the current tree is trusted.
 
+### T4 — the negation of a quantified formula was silently dropped
+
+The most serious defect in this document: `tptp_to_ladr` translated some
+problems into the *opposite* of what they said, with no diagnostic.
+
+```
+TPTP in:   fof(ax4, axiom, ~ ! [U] : (sorti2(U) => ...commutative...) ).
+LADR out:         sorti2(U) -> (all V (sorti2(V) -> op2(U,V) = op2(V,U)))
+```
+
+The input says the operation is **not** commutative. The output asserts that it
+**is**. Measured across the five forms that matter:
+
+| TPTP | should be | was emitted |
+| --- | --- | --- |
+| `~ ! [X] : p(X)` | `-(all X p(X))` | `p(X)` |
+| `~ ? [X] : p(X)` | `-(exists X p(X))` | `p(X)` |
+| `~ ! [X] : ~ p(X)` | `-(all X -p(X))` | `-p(X)` |
+| `! [X] : ~ ? [Y] : q(X,Y)` | `(all X -(exists Y q(X,Y)))` | `(all X q(X,Y))` |
+| `~ ( ! [X] : p(X) )` | `-(all X p(X))` | correct — parentheses saved it |
+
+**Mechanism.** TPTP lets `~` apply to a quantified formula without
+parentheses. `ladr/tptp_trans.c` declares `~` at precedence 410 and `:` at
+450, so `~` binds tighter and the parser produces
+
+```
+:( ~(!([X])) , p(X) )        instead of    ~( :( !([X]), p(X) ) )
+```
+
+— the negation attached to the quantifier *prefix*. The converter's `:` branch,
+whose comment reads `/* Assume it's well formed (don't check for errors). */`,
+then called `listterm_reverse()` on `!([X])`, which is not a list, received the
+empty list, never entered its variable loop, and returned the body. Both the
+negation and the quantifier vanished. The same branch also chose `exists` for
+any quantifier that was not `!`, without checking.
+
+**Why precedence alone cannot fix it.** Raising `~` above `:` does make
+`~ ! [X] : p(X)` parse correctly — and immediately breaks `! [X] : ~ p(X)`,
+because `:` can then no longer take a `~`-formula as its right operand. The
+failures swap; the count does not change. TPTP's grammar permits both nestings
+because `~ <unitary>` and `! [X] : <unitary>` recurse through the same
+nonterminal, which one precedence per operator cannot express. Setting them
+equal (both 450) breaks the parser outright. The Changelog records McCune
+trying twice, with `/* changed by McCune */` still on the line and an entry
+reading *"The Feb 14 precedence change (~) was no good."*
+
+**Fix** — in the converter, not the parse table: peel any `~` the parser bound
+to the quantifier prefix, build the quantified formula, then re-apply the
+negations outside it. The `:` branch now also rejects a quantifier that is
+neither `!` nor `?` instead of guessing. All 15 cases in the matrix pass with
+the precedence left exactly as McCune set it.
+
+**How it surfaced.** As a false accusation against Mace4. The TPTP capability
+sweep flagged dozens of problems where Mace4 reported a model for a problem
+TPTP declares a `Theorem` — which would be a soundness bug in the model
+finder. It was not: the translator had inverted an axiom, and Mace4 was
+correctly finding a model of a different problem. On `ALG029+1`, the stock
+build reports a model; with the negation preserved, no model is found, as must
+be the case. **Every apparent soundness violation in that sweep traced back to
+this defect, and none to Mace4 or Prover9.**
+
+### T5 — the translator emitted files its own prover cannot read
+
+TPTP quotes atoms with `'`, LADR with `"`. A TPTP formula name may be a
+single-quoted atom, and `tptp_input_to_ladr_formula` copied it straight into
+`label(...)`:
+
+```
+fof('EQ-var', axiom, ...)   ->   ... # label('EQ-var') # label(axiom).
+```
+
+LADR's reader then rejects the file the translator just wrote, with
+`Fatal error: sread_term error` pointing at the label. 382 of the 17,912
+first-order problems carry names of this form and every one of them failed at
+the prover rather than the translator, so nothing in the translation output
+hinted at the cause. The `-q` option does not help: it remaps function and
+predicate symbols, not formula names.
+
+Fixed by re-quoting the name in LADR's style when it arrives single-quoted,
+leaving names that are already acceptable untouched.
+
 ### T3 — and then the buffers stopped being buffers
 
 Sizing from `PATH_MAX` fixed the truncation but introduced a cost that only
@@ -1368,10 +1451,10 @@ Mace4's model printer is clean at domain sizes 4, 10, 11 and 12 — the sizes
 either side of the `n <= 10` formatting switch in `print.c` that S1 and F2
 touched.
 
-**7. Regression suite.** `test.src/regress.sh` — 32 checks. One of them, the M7
+**7. Regression suite.** `test.src/regress.sh` — 35 checks. One of them, the M7
 heap overflow, is observable only under a sanitizer, so on a plain build it
-reports SKIP and 31 run: all 31 pass on the fixed tree and **24 of them fail on
-the baseline**. Against the instrumented build all 32 run and all 32 pass. The 7
+reports SKIP and 34 run: all 34 pass on the fixed tree and **27 of them fail on
+the baseline**. Against the instrumented build all 35 run and all 35 pass. The 7
 that pass on both sides are the deliberate "must not regress" controls (a
 complete proof still transforms correctly, in-range parm derivations still
 produce their old values, a default Prover9 run still finds its proof, a TPTP

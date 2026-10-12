@@ -374,11 +374,48 @@ Term tptp3_to_ladr_term(Term t)
     return t3;
   }
   else if (is_term(t, ":", 2)) {
-    /* Assume it's well formed (don't check for errors). */
     Term q = ARG(t,0);
-    Term form = tptp3_to_ladr_term(ARG(t,1));
-    Term vars = listterm_reverse(ARG(q,0));
+    Term form;
+    Term vars;
     char *quant;
+    int negations = 0;
+
+    /* Peel any "~" the parser attached to the quantifier prefix instead of to
+       the quantified formula.
+
+       TPTP allows "~" to apply to a quantified formula without parentheses:
+       "~ ! [X] : p(X)" means "-(all X p(X))".  But "~" is declared tighter
+       (410) than ":" (450), so the parser binds it to the "![X]" prefix and
+       produces ":(~(!([X])), p(X))" rather than "~(:(!([X]), p(X)))".  The
+       code here then called listterm_reverse() on "!([X])", which is not a
+       list, got the empty list back, never entered the loop below, and
+       returned the body with both the negation and the quantifier silently
+       discarded -- asserting the opposite of the input.  1,930 of the 17,912
+       first-order TPTP v9.3.1 problems contain this shape.
+
+       Precedence alone cannot fix it: moving "~" outside ":" makes
+       "! [X] : ~ p(X)" fail instead, because then ":" cannot take a
+       "~"-formula as its right operand.  TPTP's grammar lets both nest
+       because "~ <unitary>" and "! [X] : <unitary>" recurse through the same
+       nonterminal, which a single precedence per operator cannot express.
+       The Changelog records two attempts at adjusting it, one noted as "no
+       good".  So the negations are counted here and re-applied outside the
+       quantifier, which is what the input means either way. */
+
+    while (is_term(q, "~", 1)) {
+      Term inner = ARG(q,0);
+      free_term(q);          /* shallow: inner is kept */
+      q = inner;
+      negations++;
+    }
+
+    if (!is_term(q, "!", 1) && !is_term(q, "?", 1)) {
+      p_term(t);
+      fatal_error("tptp_to_ladr: malformed quantifier");
+    }
+
+    form = tptp3_to_ladr_term(ARG(t,1));
+    vars = listterm_reverse(ARG(q,0));
 
     if (!proper_listterm(vars))
       fatal_error("tptp_to_ladr: bad quantified variable(s)");
@@ -397,6 +434,12 @@ Term tptp3_to_ladr_term(Term t)
     zap_term(vars);
     free_term(t);
     free_term(q);
+
+    /* Re-apply, outside the quantifier, any negation that the parser had
+       bound to the quantifier prefix. */
+    while (negations-- > 0)
+      form = build_unary_term_safe(not_sym(), form);
+
     return form;
   }
   else
@@ -413,6 +456,59 @@ Term tptp3_to_ladr_term(Term t)
 
 /* DOCUMENTATION
 */
+
+/*************
+ *
+ *   ladr_quoted_name()
+ *
+ *************/
+
+/* A TPTP formula name may be a single-quoted atom, as in
+ *
+ *     fof('EQ-var', axiom, ...).
+ *
+ * TPTP's quote character is ', and LADR's is ".  Copying such a name straight
+ * into label(...) therefore emits a file that LADR's own reader rejects --
+ * "Fatal error: sread_term error", pointing at the label -- so tptp_to_ladr
+ * produced input that prover9 and mace4 could not read.  382 of the 17,912
+ * first-order TPTP problems have names of this form, and every one of them
+ * failed.  (The -q option does not help: it remaps function and predicate
+ * symbols, not the formula name.)
+ *
+ * Re-quote the name in LADR's style.  A name already acceptable to LADR is
+ * returned unchanged, and so is one whose text contains a double quote, which
+ * could not be re-quoted this way; neither occurs in TPTP v9.3.1.
+ */
+
+static
+Term ladr_quoted_name(Term name)
+{
+  if (CONSTANT(name)) {
+    char *s = sn_to_str(SYMNUM(name));
+    size_t n = strlen(s);
+    if (n >= 2 && s[0] == '\'' && s[n-1] == '\'' &&
+	strchr(s, '"') == NULL) {
+      char *q = malloc(n + 1);
+      Term new_name;
+      if (q == NULL)
+	fatal_error("ladr_quoted_name, out of memory");
+      q[0] = '"';
+      memcpy(q + 1, s + 1, n - 2);
+      q[n-1] = '"';
+      q[n] = '\0';
+      new_name = get_rigid_term(q, 0);
+      free(q);
+      return new_name;
+    }
+  }
+  return copy_term(name);
+}  /* ladr_quoted_name */
+
+/*************
+ *
+ *   tptp_input_to_ladr_formula()
+ *
+ *************/
 
 /* PUBLIC */
 Formula tptp_input_to_ladr_formula(Term t)
@@ -435,7 +531,7 @@ Formula tptp_input_to_ladr_formula(Term t)
   }
 
   a = build_binary_term_safe(attrib_sym(),
-			     build_unary_term_safe("label", copy_term(name)),
+			     build_unary_term_safe("label", ladr_quoted_name(name)),
 			     build_unary_term_safe("label", copy_term(role)));
   b = build_binary_term_safe(attrib_sym(), form, a);
   f = term_to_formula(b);

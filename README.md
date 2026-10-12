@@ -44,20 +44,20 @@ the original source. No configure step, no dependencies beyond libc and libm.
 make -C test.src check
 ```
 
-runs the test suite added here: 32 regression tests, a `String_buf` unit test,
+runs the test suite added here: 35 regression tests, a `String_buf` unit test,
 and a Mace4 soundness check that independently re-verifies 271 reported models
 against their input clauses using `interpformat` and `clausetester`.
 
 Each regression test is written to fail against the original code and pass
 after the fix, so the suite measures the fixes rather than just exercising the
 programs. Run against a baseline tree — upstream with *only* the three build
-fixes applied, since upstream alone does not compile — **24 of the 31 fail**.
+fixes applied, since upstream alone does not compile — **27 of the 34 fail**.
 The 7 that pass on both sides are deliberate "must not regress" controls.
 
 One test, for the M7 heap overflow, can only be observed under a sanitizer;
 on an ordinary build it reports SKIP rather than a meaningless PASS, which is
-why the plain-build count is 31 of 32. Given a sanitizer build — pass its
-`bin` directory as an argument — all 32 run and pass.
+why the plain-build count is 34 of 35. Given a sanitizer build — pass its
+`bin` directory as an argument — all 35 run and pass.
 
 ## What was fixed
 
@@ -69,6 +69,7 @@ why the plain-build count is 31 of 32. Given a sanitizer build — pass its
 | **Hangs and crashes** | `prooftrans` and `directproof` looped forever, then dereferenced NULL, on a truncated proof |
 | **Usability** | `assign(max_minutes,-1)`, `assign(max_minutes,50000000)` and `assign(pick_given_ratio,-1)` all aborted the prover on legal input |
 | **Performance** | `String_buf` appends were quadratic in the string's length; appending 400 000 characters took 3.29 s and now takes under 0.01 s |
+| **TPTP translation** | `tptp_to_ladr` **silently dropped the negation of a quantified formula** — `~ ! [X] : p(X)` became `p(X)`, the opposite of the input, affecting 1,930 of the 17,912 first-order problems in TPTP v9.3.1; it also emitted single-quoted formula names that LADR's own reader rejects, so it produced files its own prover could not read (382 problems) |
 | **Tooling** | All four installed helper scripts (`attack`, `looper`, `gvizify`, `prover9-mace4`) were Python 2 and would not run; `gvizify` was also not executable |
 
 Full detail, with reproduction cases, in [`FIXES.md`](FIXES.md).

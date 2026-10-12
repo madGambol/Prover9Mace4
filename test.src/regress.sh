@@ -137,6 +137,32 @@ chk "T   tptp_to_ladr output proves under prover9" \
 chk "T   ladr_to_tptp round-trips it back to fof()" \
     'timeout 60 "$B/ladr_to_tptp" < "$W/grp.in" 2>/dev/null | grep -q "^fof(goals,conjecture"'
 
+# T4: tptp_to_ladr silently dropped the negation of a quantified formula.
+# TPTP allows "~" to apply to a quantified formula unparenthesised, but "~"
+# was declared tighter than ":", so "~ ! [X] : p(X)" parsed as
+# ":(~(!([X])), p(X))"; the converter then called listterm_reverse() on a
+# non-list, got the empty list, skipped its loop and returned the body --
+# asserting the opposite of the input.  1930 of the 17912 first-order
+# problems in TPTP v9.3.1 contain this shape.  Checked two ways: the emitted
+# text, and a proof that only succeeds if the negation survived.
+printf 'fof(t,axiom, ~ ! [X] : p(X) ).\n' > "$W/neg.p"
+chk "T4  negation of a quantified formula survives translation" \
+    'timeout 30 "$B/tptp_to_ladr" < "$W/neg.p" 2>/dev/null | grep -qF -- "-(all X p(X))"'
+
+printf 'fof(a1,axiom, ~ ! [X] : p(X) ).\nfof(c1,conjecture, ? [X] : ~ p(X) ).\n' \
+    > "$W/neg2.p"
+chk "T4  ...and the resulting problem proves correctly" \
+    'timeout 60 "$B/tptp_to_ladr" < "$W/neg2.p" > "$W/neg2.in" 2>/dev/null \
+       && timeout 60 "$B/prover9" -f "$W/neg2.in" 2>&1 | grep -q "THEOREM PROVED"'
+
+# T5: a single-quoted TPTP formula name was copied verbatim into label(...),
+# but TPTP quotes with ' and LADR with ", so the translator emitted a file
+# LADR's own reader rejected ("sread_term error").  382 problems affected.
+printf "fof('EQ-var',axiom, p(a) ).\n" > "$W/qn.p"
+chk "T5  single-quoted TPTP formula name is readable by prover9" \
+    'timeout 30 "$B/tptp_to_ladr" < "$W/qn.p" > "$W/qn.in" 2>/dev/null \
+       && ! timeout 30 "$B/prover9" -f "$W/qn.in" 2>&1 | grep -q "sread_term error"'
+
 # N1/N2/N3: derived parm values that used to abort the program.
 chk "N1  assign(max_minutes,-1) accepted" \
     '! opt "assign(max_minutes,-1)." | grep -q "Fatal error"'
