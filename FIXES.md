@@ -36,7 +36,8 @@ defaults to `-std=gnu23`.
 | S1 | Spurious outer loop, correct only by accident | `mace4.src/print.c:107` | latent |
 | S2–S4 | `\|` for `\|\|`, `BOOL` holding a non-`BOOL` enum, pointer→`int` | `clash.c`, `paramod.c`, `flatdemod.c`, `avltree.c` | hygiene |
 | S5 | Arithmetic on `void *` in the allocator — a GCC extension, not standard C | `ladr/memory.c:58,78` | portability |
-| T2 | The five messages that report a filename were sized by a round number (1024), so a long name was reported truncated; now sized from `PATH_MAX` + 20% | `ladr/header.h`, 5 call sites | hardening |
+| T2 | The five messages that report a filename were sized by a round number (1024), so a long name was reported truncated; sized from `PATH_MAX` + 20% | `ladr/header.h`, 5 call sites | hardening |
+| T3 | ...and that put a 4953-byte array in five frames, one of them recursive, cutting circular-`include()` depth from 40262 to 1651. The message is now measured with `snprintf(NULL,0,...)` and allocated to fit: no array, no truncation at any length, depth 87255 | `ladr/fatal.c`, 5 call sites | hardening |
 | PF1 | `String_buf` append is O(n²) | `ladr/strbuf.c` | performance |
 | X1–X5 | All 4 installed helper scripts are unrunnable | `utilities/` | broken tooling |
 | L1 | `demod1` drops a term its callee may have freed | `ladr/demod.c:376` | latent, reported only |
@@ -269,9 +270,12 @@ Op_codes[str_to_sn("mod", 2)] = MOD_OP;        /* ... 26 of these */
 `str_to_sn()` *interns* a symbol that is not already in the table, returning a
 symnum past the snapshot. Any of the 26 operator symbols that the input did not
 already mention is created right here, and its op code is written past the end
-of `Op_codes` — up to 26 `int`s, 104 bytes, beyond a 444-byte allocation.
-`Rules`, allocated from the same stale count a few lines later, is undersized
-for the same reason; it escapes only because every write to it is range-checked.
+of `Op_codes` — up to 26 `int`s, 104 bytes. The size of the allocation it runs
+past depends on the input, since the symbol count does: 444 bytes (111 symbols)
+on the corpus example quoted below, 324 (81 symbols) on the minimal reproducer
+in `regress.sh`. `Rules`, allocated from the same stale count a few lines later,
+is undersized for the same reason; it escapes only because every write to it is
+range-checked.
 
 The author knew about the hazard: lines 144, 169, 191, 372 and 424 of this same
 file all guard with `if (symnum >= Symbols_size)`. The initialisation block is
@@ -291,6 +295,27 @@ only caller of `init_dollar_eval`. In the corpus that is `2inverter.in`,
 `cabbages.in`, `jugs.in`, `list.in` and `queens3.in` — **every production-mode
 example in the Prover9 manual**. It is present in pristine LADR-2009-11A and,
 independently confirmed, in the current LADR-2026 release.
+
+**Confirmed a second time, by a second tool, on a binary that was never
+instrumented.** Valgrind's memcheck reports the same defect on the *shipped*
+baseline executable, with no rebuild of any kind:
+
+```
+Invalid write of size 4
+   at 0x4034615: init_dollar_eval
+   by 0x400BAF2: search
+ Address 0x4d7d684 is 0 bytes after a block of size 324 alloc'd
+   at 0x49F2BE3: calloc
+   by 0x4034594: init_dollar_eval
+```
+
+This matters more than a duplicate finding usually would. The ASan result for
+this defect had to be retracted once already because the library was not
+actually instrumented (see the ⚠️ Correction), and the whole class of error
+there was *"the tool silently did not examine the code I thought it did."*
+Valgrind cannot fail that way: it instruments machine code as it runs, so there
+is no build step to get wrong and no object that can be left out. The fixed
+build is clean under the same command, including `--track-origins=yes`.
 
 **Fix** — move the 26 `str_to_sn()` calls into a table, intern them all first,
 then take the symbol count and allocate both arrays from it:
@@ -639,15 +664,68 @@ integer constant expression and can size an array. `fatal_error` itself has no
 buffer, it just `fprintf`s what it is handed, so the larger size genuinely
 reaches the output.
 
-Measured: a 4000-character filename is now reproduced whole where it was
-previously cut at the buffer. Two `regress.sh` tests pin this, and both match
-the entire message rather than just the name — the first version of the
-`prover9` check grepped only for the name and **passed against the unfixed
-baseline**, because prover9's banner echoes `argv` before it ever gets to the
-error message.
+Two `regress.sh` tests pin this, and both match the entire message rather than
+just the name — the first version of the `prover9` check grepped only for the
+name and **passed against the unfixed baseline**, because prover9's banner
+echoes `argv` before it ever gets to the error message.
 
-The remaining five sites are the ones that format a filename. Buffers elsewhere
-in the tree are sized by their own content, and the
+### T3 — and then the buffers stopped being buffers
+
+Sizing from `PATH_MAX` fixed the truncation but introduced a cost that only
+showed up when measured: a 4953-byte array in each of five functions' frames.
+In four of them that is merely wasteful. In the fifth it is worse —
+`read_tptp_input` is **recursive**, following TPTP `include()` directives, so
+the array was paid for per nesting level. Its frame went from about 200 bytes
+to 5016, and a circular `include()` therefore exhausted the stack after 1651
+levels where the unfixed build had managed 40262.
+
+Both numbers are crashes, so the unbounded `include()` recursion is a
+pre-existing defect and not something the buffer change caused. But cutting the
+available depth 24-fold to gain a message size is a bad trade, and the right
+answer is not to pick a better constant — it is not to have the array:
+
+```c
+/* ladr/fatal.c */
+void fatal_file_not_found(char *context, char *filename)
+{
+  int n = snprintf(NULL, 0, "%s%sfile %s not found", ctx, sep, filename);
+  ...
+  Fatal_message = malloc((size_t) n + 1);
+```
+
+`snprintf` with a null destination and zero size returns the length the whole
+message *would* need, so the message is measured and then allocated to fit. The
+filename comes from input or `argv`, and nothing now bounds how much of it is
+reported: a 20000-character name — four times `FILE_MESSAGE_SIZE` — comes back
+in full. The five call sites are each one line, with no buffer at all, and
+`read_tptp_input`'s frame is **40 bytes**. A circular include now reaches
+**87255** levels, more than twice the unfixed build's depth, because the
+original `char s[100]` is gone from the frame too.
+
+Three details that each took a check rather than an assumption:
+
+- **The allocator is plain `malloc`, not the LADR one.** `palloc()` calls
+  `fatal_error()` when it cannot allocate, which from inside a fatal-error path
+  would recurse.
+- **`FILE_MESSAGE_SIZE` survives as the fallback** if `malloc` returns NULL —
+  we may be here precisely because memory ran out. That path truncates, which
+  is the correct trade when the alternative is saying nothing at all. It is
+  also why the `PATH_MAX` + 20% derivation is still the one that governs the
+  worst case.
+- **The message pointer is file-scope, not local.** `fatal_error()` does not
+  return, so the message cannot be freed. Held in a local, every run that
+  reports a missing file would look like a leak to a leak checker; reachable
+  from a file-scope pointer, it is not one. Verified: valgrind
+  `--leak-check=full --show-leak-kinds=all` on that exact path reports
+  **0 definitely, indirectly and possibly lost**, with the message among
+  "still reachable" — which is what a pointer deliberately held to `exit()`
+  should look like.
+
+The messages themselves are byte-for-byte what they were, which the regression
+tests check by matching the full text.
+
+The five sites were the ones that format a filename. Buffers elsewhere in the
+tree are sized by their own content, and the
 `-Wformat-truncation=2 -Wformat-overflow=2` rebuild still reports nothing.
 
 ---

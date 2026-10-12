@@ -91,3 +91,62 @@ void fatal_error(char *message)
   fprintf(stderr, "\nFatal error:  %s\n\n", message);
   exit(Fatal_exit_code);
 }  /* fatal_error */
+
+/*************
+ *
+ *   fatal_file_not_found()
+ *
+ *************/
+
+/* DOCUMENTATION
+Report that <filename> could not be opened, and exit.  If <context> is
+non-NULL it names the routine that was trying to open the file.
+
+The filename comes from input or from argv, so its length is not bounded by
+anything this code controls.  The message is therefore measured and then
+allocated to fit, rather than formatted into a fixed buffer: snprintf()
+returns the length the complete message would need, so nothing is truncated
+however long the name is, and no size has to be guessed.
+
+Two deliberate choices.  The allocation is plain malloc(), not the LADR
+allocator: palloc() calls fatal_error() when it cannot allocate, which from
+here would recurse.  And the message is built in this routine rather than in
+each caller, so that no caller carries a large buffer in its frame -- one of
+them (read_tptp_input, which follows TPTP include() directives) is recursive,
+where that cost would be paid per nesting level.
+
+If the allocation fails -- we may be here precisely because memory ran out --
+a fixed buffer of FILE_MESSAGE_SIZE is used instead, which reports a name
+longer than that truncated but still says what went wrong.
+
+The message cannot be freed, because fatal_error() does not return, so the
+pointer is held in a file-scope variable rather than a local.  That is not
+cosmetic: an allocation still reachable at exit() is not a leak, and holding
+it this way keeps the program clean under LeakSanitizer, whereas a local
+would make every run that reports a missing file look like it leaked.
+*/
+
+static char *Fatal_message = NULL;   /* lives until exit; see below */
+
+/* PUBLIC */
+void fatal_file_not_found(char *context, char *filename)
+{
+  char *ctx = (context == NULL ? "" : context);
+  char *sep = (context == NULL ? "" : ", ");
+  int n = snprintf(NULL, 0, "%s%sfile %s not found", ctx, sep, filename);
+
+  if (n >= 0) {
+    Fatal_message = malloc((size_t) n + 1);
+    if (Fatal_message != NULL) {
+      snprintf(Fatal_message, (size_t) n + 1,
+	       "%s%sfile %s not found", ctx, sep, filename);
+      fatal_error(Fatal_message);   /* does not return */
+    }
+  }
+
+  {
+    char s[FILE_MESSAGE_SIZE];
+    snprintf(s, sizeof(s), "%s%sfile %s not found", ctx, sep, filename);
+    fatal_error(s);
+  }
+}  /* fatal_file_not_found */

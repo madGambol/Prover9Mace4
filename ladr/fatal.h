@@ -39,4 +39,6 @@ void set_fatal_exit_code(int exit_code);
 
 void fatal_error(char *message);
 
+void fatal_file_not_found(char *context, char *filename);
+
 #endif  /* conditional compilation of whole file */
