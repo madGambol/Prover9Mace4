@@ -11,7 +11,7 @@ CFLAGS = $(XFLAGS) -g  -O0 -Wall
 # CFLAGS = $(XFLAGS) -pg -O -Wall
 # CFLAGS = $(XFLAGS)  -Wall -pedantic
 
-PROGRAMS = avltest strbuf_test
+PROGRAMS = avltest strbuf_test memory_test
 
 all: ladr apps
 
@@ -36,14 +36,19 @@ avltest: avltest.o
 strbuf_test: strbuf_test.o
 	$(CC) $(CFLAGS) -o strbuf_test strbuf_test.o ../ladr/libladr.a -lm
 
+# Checks that the palloc() byte counter is wide enough; needs ~2.2GB.
+memory_test: memory_test.o
+	$(CC) $(CFLAGS) -o memory_test memory_test.o ../ladr/libladr.a -lm
+
 # Run the regression tests (each exits nonzero on failure).
 #   strbuf_test        - String_buf semantics + the non-quadratic append
 #   regress.sh         - the defects listed in ../FIXES.md
 #   mace4_soundness.sh - every model Mace4 reports really does satisfy the
 #                        input clauses (checked independently by clausetester)
 # Each accepts a bin directory, e.g.  ./regress.sh /path/to/other/bin
-check: strbuf_test
+check: strbuf_test memory_test
 	./strbuf_test
+	./memory_test
 	./regress.sh
 	./mace4_soundness.sh
 
@@ -70,8 +75,9 @@ tier1:
 	./demos/run.sh
 	./tptp_semantics.sh
 
-tier2: strbuf_test tier1
+tier2: strbuf_test memory_test tier1
 	./strbuf_test
+	./memory_test
 	./regress.sh
 	./mace4_soundness.sh
 	cd .. && $(MAKE) test1 && $(MAKE) test2 && $(MAKE) test3

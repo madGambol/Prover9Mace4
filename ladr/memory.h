@@ -53,7 +53,7 @@ void set_max_megs(int megs);
 
 void set_max_megs_proc(void (*proc)(void));
 
-int bytes_palloced(void);
+size_t bytes_palloced(void);
 
 void *tp_alloc(size_t n);
 

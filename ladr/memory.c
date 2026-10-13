@@ -19,7 +19,17 @@
 #include "memory.h"
 
 #define MALLOC_MEGS        20  /* size of blocks malloced by palloc */
-#define DEFAULT_MAX_MEGS  500  /* change with set_max_megs(n) */
+/* The ceiling palloc() enforces, in megabytes, changeable with
+   set_max_megs(n) or assign(max_megs,n).  500 was the 2009 figure.  Nothing
+   in the design ties the limit to that number -- the option has always
+   accepted anything up to INT_MAX, and -1 for no limit -- but two counters
+   below did track it, and they are widened in this commit so that raising it
+   is actually safe.  1000 is a cautious step rather than the maximum: on a
+   machine with tens of gigabytes the old default stopped searches that had
+   plenty of room left, and it was the binding constraint on a number of TPTP
+   problems (ALG021+1 hits it in four seconds). */
+
+#define DEFAULT_MAX_MEGS 1000
 #define MAX_MEM_LISTS     500  /* number of lists of available nodes */
 
 static void ** M[MAX_MEM_LISTS];
@@ -30,7 +40,13 @@ static void (*Exit_proc) (void);         /* set with set_max_megs_proc() */
 
 static int Malloc_calls = 0;   /* number of calls to malloc by palloc */
 
-static unsigned Bytes_palloced = 0;
+/* size_t, not unsigned.  As a 32-bit unsigned this wrapped at 4GB, and
+   bytes_palloced() returned it as an int, which wrapped at 2GB -- so with
+   max_megs raised past about 2000 the memory report and the Megabytes
+   statistic silently went wrong.  These two were the only things that
+   actually tracked the 500MB default. */
+
+static size_t Bytes_palloced = 0;
 
 /* These are char* rather than void* because palloc() does arithmetic on
    them.  Arithmetic on void* is a GCC extension (it treats void as having
@@ -318,7 +334,7 @@ This includes all of the get_mem() calls.
 */
 
 /* PUBLIC */
-int bytes_palloced(void)
+size_t bytes_palloced(void)
 {
   return Bytes_palloced;
 }  /* bytes_palloced */
