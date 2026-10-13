@@ -63,7 +63,7 @@ There are also routines for reading and writing fast-parse clauses.
 
 /* Public function prototypes from fastparse.c */
 
-void fast_set_symbol(char c, int arity);
+void fast_set_symbol(char c, ArityType arity);
 
 void fast_set_defaults(void);
 

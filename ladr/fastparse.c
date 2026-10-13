@@ -20,7 +20,7 @@
 
 /* Private definitions and types */
 
-static int Arity[256];      /* table of arities for each symbol */
+static ArityType Arity[256];    /* table of arities for each symbol */
 static int Symnum[256];     /* table of arities for each symbol */
 
 static int Pos;            /* index for parsing */
@@ -45,7 +45,7 @@ Also, you don't need to call this routine for constants.
 */
 
 /* PUBLIC */
-void fast_set_symbol(char c, int arity)
+void fast_set_symbol(char c, ArityType arity)
 {
   if (c >= 'r' && c <= 'z') {
     fatal_error("fast_set_symbol, r--z are variables and cannot be declared");

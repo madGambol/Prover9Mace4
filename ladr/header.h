@@ -28,6 +28,30 @@
 
 typedef enum { FALSE=0, TRUE=1 } BOOL;
 
+/* ArityType: how many arguments a term or symbol takes.
+ *
+ * A named type because arity is a particular abstract quantity with its own
+ * bound, not merely some integer that happens to be wide enough.  Before
+ * this it was spelled "unsigned char" in struct term and struct flatterm and
+ * "int" in sixty-odd declarations, and the two disagreed silently: anything
+ * above 255 was truncated on its way into a term, so the term and its own
+ * args array no longer agreed about how many arguments there were.
+ *
+ * Unsigned and narrow deliberately.  struct term is the most numerous object
+ * in the system, and this width lets the field sit in padding that was
+ * already there, so sizeof(struct term) is unchanged at 32 bytes.
+ *
+ * ARITY_NONE is the "this is not an arity" value, for a lookup that failed or
+ * a symbol whose arity is unspecified.  Those cases used -1, which an
+ * unsigned type cannot hold; giving the case a name is clearer than the bare
+ * -1 was.  MAX_ARITY is one below it so the two can never collide.
+ */
+
+typedef unsigned short ArityType;
+
+#define MAX_ARITY  ((ArityType) (USHRT_MAX - 1))   /* 65534 */
+#define ARITY_NONE ((ArityType) USHRT_MAX)         /* not an arity */
+
 #define IMAX(a,b) ((a) > (b) ? (a) : (b))
 #define IMIN(a,b) ((a) < (b) ? (a) : (b))
 

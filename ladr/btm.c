@@ -980,7 +980,7 @@ Btm_state match_bt_guts(Btm_state bt1)
       status = POP;
 	
     else {  /* both COMPLEX with same symbol (and same arity) */
-      int arity = ARITY(t1);
+      ArityType arity = ARITY(t1);
 
       if (arity == 2 && is_commutative(SYMNUM(t1))) {
 	if (match_commute(t1, c1, t2, bt1))

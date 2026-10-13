@@ -54,7 +54,7 @@ typedef struct flatterm * Flatterm;
 
 struct flatterm {
   short         private_symbol; /* const/func/pred/var symbol ID */
-  unsigned char arity;          /* number of auguments */
+  ArityType         arity;          /* number of arguments */
   Flatterm prev, next, end;
 
   /* The rest of the fields are for index retrieval and demodulation. */

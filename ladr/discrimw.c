@@ -261,7 +261,7 @@ int num_ac_nv_args(struct term *t, int symbol)
 static
 void print_discrim_wild_tree(FILE *fp, Discrim d, int n, int depth)
 {
-  int arity, i;
+  ArityType arity, i;
 
   for (i = 0; i < depth; i++)
     fprintf(fp, " -");
