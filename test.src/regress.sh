@@ -163,6 +163,17 @@ chk "T5  single-quoted TPTP formula name is readable by prover9" \
     'timeout 30 "$B/tptp_to_ladr" < "$W/qn.p" > "$W/qn.in" 2>/dev/null \
        && ! timeout 30 "$B/prover9" -f "$W/qn.in" 2>&1 | grep -q "sread_term error"'
 
+# T8: the converter has always had branches for TPTP's NAND and NOR, but the
+# parser was never told the operators exist, so any problem using them failed.
+printf 'fof(a,axiom, p(a) ~& q(b) ).\nfof(g,conjecture, ~ (p(a) & q(b)) ).\n' > "$W/nand.p"
+chk "T8  ~& (NAND) translates and means -(a & b)" \
+    'timeout 60 "$B/tptp_to_ladr" < "$W/nand.p" > "$W/nand.in" 2>/dev/null \
+       && timeout 60 "$B/prover9" -f "$W/nand.in" 2>&1 | grep -q "THEOREM PROVED"'
+printf 'fof(a,axiom, p(a) ~| q(b) ).\nfof(g,conjecture, ~ (p(a) | q(b)) ).\n' > "$W/nor.p"
+chk "T8  ~| (NOR) translates and means -(a | b)" \
+    'timeout 60 "$B/tptp_to_ladr" < "$W/nor.p" > "$W/nor.in" 2>/dev/null \
+       && timeout 60 "$B/prover9" -f "$W/nor.in" 2>&1 | grep -q "THEOREM PROVED"'
+
 # N1/N2/N3: derived parm values that used to abort the program.
 chk "N1  assign(max_minutes,-1) accepted" \
     '! opt "assign(max_minutes,-1)." | grep -q "Fatal error"'
