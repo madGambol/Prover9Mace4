@@ -1486,6 +1486,70 @@ path, or a semantics-preserving rewrite.
 
 ---
 
+## Determinism, and the control that every A/B here depends on
+
+Every "behaviour preserved" claim above rests on comparing two runs and finding
+them identical. That comparison is worth stating precisely, because getting it
+wrong produced two false findings in the course of this work, and the second one
+cost a long investigation.
+
+**Are the provers deterministic?** Yes. For a saturation prover with no random
+clause selection enabled, the given-clause loop is a deterministic function of
+the input, so two runs on one machine with one resource budget must agree. They
+do. `test.src/determinism.sh` is the harness, and `test.src/normalize_output.sh`
+is the single filter it uses — one copy, in the repository, because writing it
+inline is how it kept going wrong.
+
+**The two defective filters.** Five slightly different ad-hoc copies of that
+filter were used while this document was being written. Two were wrong:
+
+- One omitted the banner line, which echoes the path of the binary that produced
+  it. An A/B between two builds installed in different directories then reported
+  that **336 of 336 runs differed** — a result which, taken at face value, says
+  the change broke everything.
+
+- One matched `wall` case-sensitively and so missed `Wall_clock=`, the elapsed
+  seconds. A run taking 0 seconds and one taking 1 second then looked like a
+  behavioural difference. This is the one that mattered: it made `queens3.in`
+  look nondeterministic, and nondeterminism in a prover points at uninitialised
+  memory, so that is what was investigated. There was nothing there.
+  `valgrind --tool=memcheck --track-origins=yes` on that run reports 0
+  uninitialised-value reports, 0 invalid reads, and `0 errors from 0 contexts`;
+  disabling ASLR with `setarch -R` changes nothing, ruling out any
+  address-dependent ordering. With both lines filtered, ten runs of each of two
+  different builds all produce one hash.
+
+**What survives a correct filter is the clock, and only the clock.** Over a
+336-run corpus:
+
+| | runs | result |
+|---|---:|---|
+| Killed at the resource limit | 134 | not comparable — SIGKILL lands mid-output |
+| Self-terminating, identical | 190 | identical across repeats *and* across builds |
+| Self-terminating, differing | 12 | all exit on a timer |
+
+The 134 are open-ended searches: Mace4 climbing domain sizes with no upper
+bound, Prover9 saturating a non-theorem. `redeclare.in` reached domain size 117
+on one run and further on the next; given a budget it can finish inside, it
+exits `max_megs_no` and is perfectly reproducible. The 12 are nine Mace4 runs
+exiting `max_sec_no` and three Prover9 runs exiting `max_seconds` — a timer
+decides where the search stops, so the stopping point is not a property of the
+code.
+
+**The control that settles it.** Running the *same* binary against itself (A/A)
+gives the noise floor, and an A/B number means nothing except when read against
+it. On the self-terminating set, A/A differs on 12 runs and A/B on the same 12.
+A difference that appears when a binary is compared with itself is the
+measurement, not the change under test. Earlier noise-floor figures quoted in
+this project's history were taken without that control and were inflated by the
+two filter defects above.
+
+The practical rule, now enforced by the harness: **compare only runs that stop
+for a reason the input determines** — a proof, a model, exhaustion, or a memory
+ceiling. Never compare runs stopped by a clock.
+
+---
+
 ## Removed: upstream's in-tree backups
 
 The tarball ships 83 files that nothing builds. They are version control done
