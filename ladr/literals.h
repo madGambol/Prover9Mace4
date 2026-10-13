@@ -51,7 +51,7 @@ void zap_literal(Literals l);
 
 void zap_literals(Literals l);
 
-Literals new_literal(int sign, Term atom);
+Literals new_literal(BOOL sign, Term atom);
 
 Literals copy_literal(Literals lit);
 

@@ -159,7 +159,7 @@ BOOL subsumes_bt(Topform c, Topform d)
 {
   Context subst = get_context();
   Plist g = NULL;
-  int rc = subsume_bt_literals(c->literals, subst, d, &g);
+  BOOL rc = subsume_bt_literals(c->literals, subst, d, &g);
   if (rc) {
     /* Cancel the list (stack) of btm_states */
     while (g != NULL) {

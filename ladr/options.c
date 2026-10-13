@@ -448,7 +448,12 @@ index is out of range, bad things can happen.
 
 /* PUBLIC */
 
-int flag(int flag_id)
+/* A flag is set only by set_flag/clear_flag, which pass TRUE and FALSE to
+   update_flag(), so a flag's value is always one of those two.  Returning
+   BOOL rather than int says so, and removes about thirty int-to-BOOL
+   conversions at the call sites. */
+
+BOOL flag(int flag_id)
 {
   return Flags[flag_id].val;
 }  /* flag */
@@ -599,7 +604,7 @@ void update_flag(FILE *fout, int id, BOOL val, BOOL echo)
 		      p->val ? "set" : "clear",
 		      Flags[p->id].name);
 	    }
-	    update_flag(fout, p->id, p->val, echo);
+	    update_flag(fout, p->id, p->val != 0 ? TRUE : FALSE, echo);
 	  }
 	  else if (p->type == PARMT) {
 	    if (echo) {
@@ -753,7 +758,7 @@ void assign_parm(int id, int val, BOOL echo)
 		    p->val ? "set" : "clear",
 		    Flags[p->id].name);
 	  }
-	  update_flag(stdout, p->id, p->val, echo);
+	  update_flag(stdout, p->id, p->val != 0 ? TRUE : FALSE, echo);
 	}
       }
     }

@@ -90,7 +90,7 @@ void fprint_options(FILE *fp);
 void p_options(void);
 
 
-int flag(int flag_id);
+BOOL flag(int flag_id);
 
 int parm(int parm_id);
 

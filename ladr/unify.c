@@ -184,7 +184,7 @@ associated with the unify package.
 /* PUBLIC */
 void p_unify_mem()
 {
-  fprint_unify_mem(stdout, 1);
+  fprint_unify_mem(stdout, TRUE);
 }  /* p_unify_mem */
 
 /*
@@ -345,7 +345,7 @@ BOOL variant(Term t1, Context c1,
     ok = match(t1, c1, t2, trp);
   }
   else
-    ok = 0;
+    ok = FALSE;
 
   free_context(c2);
   return ok;

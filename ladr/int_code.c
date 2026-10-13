@@ -319,7 +319,7 @@ Topform get_clause_from_ibuf(Ibuffer ibuf)
   Just j = get_just_from_ibuf(ibuf);
 
   Term t = get_term_from_ibuf(ibuf);
-  Topform c = term_to_topform(t, is_formula);
+  Topform c = term_to_topform(t, is_formula != 0 ? TRUE : FALSE);
   zap_term(t);
 
   c->id = id;
