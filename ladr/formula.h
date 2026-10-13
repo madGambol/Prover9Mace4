@@ -75,9 +75,15 @@ void zap_formula(Formula f);
 
 BOOL logic_term(Term t);
 
+void gather_symbols_in_formula_term_acc(Term t, I2accum rsyms, I2accum fsyms);
+
 void gather_symbols_in_formula_term(Term t, I2list *rsyms, I2list *fsyms);
 
+void gather_symbols_in_formula_acc(Formula f, I2accum rsyms, I2accum fsyms);
+
 void gather_symbols_in_formula(Formula f, I2list *rsyms, I2list *fsyms);
+
+void gather_symbols_in_formulas_acc(Plist lst, I2accum rsyms, I2accum fsyms);
 
 void gather_symbols_in_formulas(Plist lst, I2list *rsyms, I2list *fsyms);
 

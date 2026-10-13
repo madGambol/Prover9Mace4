@@ -235,4 +235,40 @@ Ilist multiset_to_set(I2list m);
 
 int multiset_occurrences(I2list m, int i);
 
+/* An accumulator for building a large multiset.
+ *
+ * multiset_add_n() searches the I2list for the element it is adding, so
+ * building a multiset of N distinct elements costs O(N^2) comparisons.  That
+ * is fine for the multiset of variables in a clause, which MAX_VARS caps at
+ * 100, and it is not fine for the multiset of symbols in an input file, which
+ * has no cap at all.  See the comment on multiset_add_n() in glist.c for the
+ * measurements.
+ *
+ * I2accum is the same abstraction -- a multiset of ints -- with O(1) amortised
+ * insertion, backed by a hash table.  Build with i2accum_add_n(), then call
+ * i2accum_to_i2list() once to get an ordinary I2list for everything that
+ * consumes one.  The list comes back in first-seen order, which is the order
+ * multiset_add_n() produces, so the two are interchangeable.
+ */
+
+typedef struct i2accum * I2accum;
+
+I2accum get_i2accum(void);
+
+void zap_i2accum(I2accum acc);
+
+void i2accum_add_n(I2accum acc, int i, int n);
+
+void i2accum_add(I2accum acc, int i);
+
+int i2accum_occurrences(I2accum acc, int i);
+
+int i2accum_distinct(I2accum acc);
+
+I2list i2accum_to_i2list(I2accum acc);
+
+Ilist i2accum_to_set(I2accum acc);
+
+I2accum i2list_to_i2accum(I2list m);
+
 #endif  /* conditional compilation of whole file */

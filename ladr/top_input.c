@@ -537,19 +537,25 @@ void accept_list(char *name, int type, BOOL aux, Plist *l)
 static
 void input_symbols(int type, BOOL aux, Ilist *fsyms, Ilist *rsyms)
 {
-  I2list fsyms_multiset = NULL;
-  I2list rsyms_multiset = NULL;
+  /* This is the symbol gather for a whole input list, so the number of
+     distinct symbols is whatever the file contains -- unbounded.  Accumulate
+     into the hash-backed I2accum rather than an I2list multiset, and convert
+     once at the end; building an I2list here is quadratic in the symbol count
+     (see multiset_add_n in glist.c).  One accumulator spans every Readlist of
+     the requested type, so the conversion happens once, not once per list. */
+  I2accum fsyms_multiset = get_i2accum();
+  I2accum rsyms_multiset = get_i2accum();
   Readlist p;
   for (p = Input_lists; p; p = p->next) {
     if (p->type == type && p->auxiliary == aux) {
-      gather_symbols_in_formulas(*(p->p), &rsyms_multiset, &fsyms_multiset);
+      gather_symbols_in_formulas_acc(*(p->p), rsyms_multiset, fsyms_multiset);
     }
   }
-  *rsyms = multiset_to_set(rsyms_multiset);
-  *fsyms = multiset_to_set(fsyms_multiset);
+  *rsyms = i2accum_to_set(rsyms_multiset);
+  *fsyms = i2accum_to_set(fsyms_multiset);
   *fsyms = remove_variable_symbols(*fsyms);
-  zap_i2list(fsyms_multiset);
-  zap_i2list(rsyms_multiset);
+  zap_i2accum(fsyms_multiset);
+  zap_i2accum(rsyms_multiset);
 
   if (FALSE) {
     Ilist p;
