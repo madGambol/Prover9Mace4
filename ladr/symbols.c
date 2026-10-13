@@ -2718,20 +2718,71 @@ smallest natural number that results in a new symbol (regardless of
 arity).  The prefix must be less than MAX_NAME characters.
 */
 
+/* Where each prefix got to last time.
+
+   fresh_symbol() used to restart at <prefix>0 on every call, and str_exists()
+   scans the whole symbol table, so producing n fresh symbols with one prefix
+   cost O(n^2) full table scans.  That is not a corner case: tptp_to_ladr
+   renames every symbol that is not a legal LADR symbol, and TPTP axiom files
+   carry thousands of them -- Axioms/BIO001+0.ax has 25,062 and
+   Axioms/CSR003+2.ax 14,265 -- so translating the largest problems took
+   minutes to hours, and most of it was here.  Remembering the high-water mark
+   per prefix leaves one scan per call.
+
+   The table is small because the whole library uses five prefixes ("x", "c_",
+   "X", "tptp", "ladr"); if it ever fills, the old behaviour of starting from
+   zero is the fallback, which is slow but still correct. */
+
+#define FRESH_PREFIXES 16
+
+static
+int *fresh_counter(char *prefix)
+{
+  static char names[FRESH_PREFIXES][MAX_NAME + 1];
+  static int counts[FRESH_PREFIXES];
+  static int used = 0;
+  int i;
+
+  for (i = 0; i < used; i++)
+    if (str_ident(prefix, names[i]))
+      return &counts[i];
+
+  if (used < FRESH_PREFIXES) {
+    strncpy(names[used], prefix, MAX_NAME);
+    names[used][MAX_NAME] = '\0';
+    counts[used] = 0;
+    return &counts[used++];
+  }
+  return NULL;
+}  /* fresh_counter */
+
 /* PUBLIC */
 int fresh_symbol(char *prefix, int arity)
 {
   char name[MAX_NAME + INT_STRING_SIZE];
-  int i = 0;
+  int *next;
+  int i;
 
   if (strlen(prefix) > MAX_NAME) {
     fatal_error("fresh_symbol, prefix is too big.");
   }
 
+  /* The documented contract was "the smallest natural number that results in
+     a new symbol".  It is now "a natural number": the names are arbitrary and
+     only freshness matters, and every candidate is still checked against the
+     symbol table, so a name that collides with one from the input is skipped
+     exactly as before. */
+
+  next = fresh_counter(prefix);
+  i = (next == NULL ? 0 : *next);
+
   do {
     snprintf(name, sizeof(name), "%s%d", prefix, i);
     i++;
   } while (str_exists(name));
+
+  if (next != NULL)
+    *next = i;
 
   return str_to_sn(name, arity);
 }  /* fresh_symbol */
