@@ -115,6 +115,60 @@ int main(void)
     zap_string_buf(sb);
   }
 
+  /* Indexed reading, which was the other quadratic direction.
+   *
+   * sb_char() and sb_replace_char() used to walk a list of 100-byte chunks
+   * from the head, so reading a buffer of N characters by index cost about
+   * N^2/200 pointer hops.  Four places do exactly that in a loop -- the
+   * tokeniser in parse.c, sb_remove_some_space() in the same file, and both
+   * sb_to_malloc_string() and sb_to_malloc_char_array().
+   *
+   * The buffer is flat now, so this is O(1) per access.  At 400,000
+   * characters the old code needed roughly 8x10^8 hops and took seconds; the
+   * threshold below is generous enough not to be flaky on a loaded machine
+   * while still being far out of reach of a quadratic implementation.
+   *
+   * Correctness is checked alongside the timing, because a fast
+   * implementation that returned the wrong character would otherwise pass.
+   */
+  {
+    String_buf sb = get_string_buf();
+    int i;
+    int wrong = 0;
+    double secs;
+    clock_t t0;
+
+    for (i = 0; i < 400000; i++)
+      sb_append_char(sb, (char) ('a' + (i % 26)));
+
+    t0 = clock();
+    for (i = 0; i < 400000; i++)
+      if (sb_char(sb, i) != (char) ('a' + (i % 26)))
+	wrong++;
+    secs = (double)(clock() - t0) / CLOCKS_PER_SEC;
+    printf("      400000 sb_char reads took %.2f s\n", secs);
+    check("400000 indexed reads under 2s (was quadratic)", secs < 2.0);
+    check("400000 indexed reads all correct", wrong == 0);
+
+    /* Reading backwards must be no worse: the access pattern in parse.c's
+       sb_remove_some_space() steps back as well as forward, which is why a
+       forward-only cursor over the old chunk list would not have been a fix. */
+    t0 = clock();
+    for (i = 400000 - 1; i >= 0; i--)
+      if (sb_char(sb, i) != (char) ('a' + (i % 26)))
+	wrong++;
+    secs = (double)(clock() - t0) / CLOCKS_PER_SEC;
+    printf("      400000 backwards reads took %.2f s\n", secs);
+    check("400000 backwards reads under 2s", secs < 2.0);
+    check("400000 backwards reads all correct", wrong == 0);
+
+    /* Out of range stays '\0' at both ends. */
+    check("sb_char below range", sb_char(sb, -1) == '\0');
+    check("sb_char above range", sb_char(sb, 400000) == '\0');
+
+    zap_string_buf(sb);
+  }
+
   printf("\n%s (%d failure(s))\n", failures ? "FAILED" : "ALL PASSED", failures);
   return failures != 0;
 }
