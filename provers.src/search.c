@@ -70,7 +70,19 @@ static struct {
 
   // basic properties of usable+sos
 
-  BOOL horn, unit, equality, number_of_clauses, number_of_neg_clauses;
+  BOOL horn, unit, equality;
+
+  /* These two are counts, not flags.  They were declared BOOL along with the
+     three above -- five names on one line, the last two of a different kind --
+     and they are assigned plist_count() sums and then compared against 100
+     (see basic_clause_properties() and the use at "number_of_clauses < 100").
+
+     It works only because GCC gives an enum int width.  Under -fshort-enums,
+     which is the default on ARM EABI, BOOL is one byte and a count of 300
+     reads back as 44, flipping that comparison and so changing which search
+     strategy is chosen. */
+
+  int number_of_clauses, number_of_neg_clauses;
 
   // other stuff
 

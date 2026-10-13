@@ -1289,7 +1289,7 @@ This Boolean routine checks if an FPA/Path index is empty.
 /* PUBLIC */
 BOOL fpa_empty(Fpa_index idx)
 {
-  return (idx == NULL ? TRUE : idx->root->kids == NULL);
+  return (idx == NULL || idx->root->kids == NULL);
 }  /* fpa_empty */
 
 /*************

@@ -240,12 +240,13 @@ Topform random_clause(int v, int a0, int a1, int a2, int a3,
 {
   Term t;
   Topform c;
-  int i, sign;
+  int i;
+  BOOL sign;
   int n = (rand() % max_lits) + 1;  /* [1 .. max_lits] */
   
   c = get_topform();
   for (i = 0; i < n; i++) {
-    sign = rand() % 2;
+    sign = (rand() % 2) ? TRUE : FALSE;
     t = random_complex_term(v, a0, a1, a2, a3, max_depth);
     c->literals = append_literal(c->literals, new_literal(sign, t));
   }

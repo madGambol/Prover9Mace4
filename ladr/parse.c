@@ -412,7 +412,7 @@ BOOL special_char(char c)
 {
   /* This allows us to have special chars in the list below. */
   if (quote_char(c) || end_char(c) || comment_char(c) || punctuation_char(c))
-    return 0;
+    return FALSE;
   else
     return (c == '+' ||
 	    c == '-' ||

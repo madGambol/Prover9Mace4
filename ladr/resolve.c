@@ -159,7 +159,7 @@ void hyper_sat_atom(BOOL flipped, Literals slit, Term atom, int pos_or_neg,
       }
       else {
 	if (!Production_mode)
-	  p->clashable = positive ? !nlit->sign : nlit->sign;
+	  p->clashable = (positive ? !nlit->sign : nlit->sign) ? TRUE : FALSE;
 	else
 	  p->clashable = (positive &&
 			  !nlit->sign &&
@@ -224,7 +224,7 @@ void hyper_nucleus(Topform c, int pos_or_neg, Lindex idx,
     if (first == NULL)
       first = p;
     if (!Production_mode)
-      p->clashable = positive ? !lit->sign : lit->sign;
+      p->clashable = (positive ? !lit->sign : lit->sign) ? TRUE : FALSE;
     else
       p->clashable = (positive &&
 		      !lit->sign &&

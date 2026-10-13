@@ -1199,7 +1199,7 @@ and sn_to_str() translate between the two forms.
 BOOL is_assoc_comm(int sn)
 {
   Symbol p = lookup_by_id(sn);
-  return (p == NULL ? 0 : p->unif_theory == ASSOC_COMMUTE);
+  return (p != NULL && p->unif_theory == ASSOC_COMMUTE) ? TRUE : FALSE;
 }  /* is_assoc_comm */
 
 /*************
@@ -1221,7 +1221,7 @@ translate between the two forms.
 BOOL is_commutative(int sn)
 {
   Symbol p = lookup_by_id(sn);
-  return (p == NULL ? 0 : p->unif_theory == COMMUTE);
+  return (p != NULL && p->unif_theory == COMMUTE) ? TRUE : FALSE;
 }  /* is_commutative */
 
 /****************************************************************************/
