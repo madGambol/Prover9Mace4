@@ -60,6 +60,7 @@ should be able to run one file and see it.
 | `perf-fresh-symbol.sh` | `fresh_symbol()` restarted its search on every call | performance |
 | `perf-strbuf-indexing.sh` | `String_buf` indexing walked a chunk list from the head | performance |
 | `perf-multiset-symbols.sh` | the symbol multiset was built, and read back, by linear search | performance |
+| `perf-predicate-elim.sh` | `predicate_elimination` recomputed its whole candidate set per symbol | performance |
 | `arity-ceiling.sh` | `MAX_ARITY` was 255, and the field was narrower than the parameters | wrong results / lost problems |
 
 The remaining defects in `FIXES.md` -- the `zap_flatterm` use-after-free, the
