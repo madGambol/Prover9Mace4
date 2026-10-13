@@ -163,6 +163,45 @@ chk "T5  single-quoted TPTP formula name is readable by prover9" \
     'timeout 30 "$B/tptp_to_ladr" < "$W/qn.p" > "$W/qn.in" 2>/dev/null \
        && ! timeout 30 "$B/prover9" -f "$W/qn.in" 2>&1 | grep -q "sread_term error"'
 
+# T6: TPTP's "distinct object" token, written in double quotes.  LADR quotes
+# with ' here, so a double quote was not even lexable and every problem
+# containing one failed with "sread_term error" -- 239 of the 1060 Commonsense
+# Reasoning problems, whose axiom files render Cyc's numerals this way.  Each
+# one now becomes a constant and their pairwise inequality, which TPTP leaves
+# implicit, is stated.  Checked by proving an inequality that only follows if
+# the axioms are there.
+printf 'fof(ax,axiom, p("Apple") & p("Microsoft") & p("Sun") ).\nfof(g,conjecture, "Apple" != "Microsoft" ).\n' \
+    > "$W/do.p"
+chk "T6  distinct objects translate" \
+    'timeout 30 "$B/tptp_to_ladr" < "$W/do.p" > "$W/do.in" 2>/dev/null'
+chk "T6  ...and their implicit inequality is provable" \
+    'timeout 60 "$B/tptp_to_ladr" < "$W/do.p" > "$W/do.in" 2>/dev/null \
+       && timeout 60 "$B/prover9" -f "$W/do.in" 2>&1 | grep -q "THEOREM PROVED"'
+# ...but a distinct object may still equal an ordinary term, so this must NOT
+# be provable.  Without this the test above would pass on a translator that
+# simply made everything unequal.
+printf 'fof(ax,axiom, p("a") & p("b") & p(cat) ).\nfof(g,conjecture, "a" != cat ).\n' \
+    > "$W/dc.p"
+chk "T6  a distinct object may still equal an ordinary term" \
+    'timeout 60 "$B/tptp_to_ladr" < "$W/dc.p" > "$W/dc.in" 2>/dev/null \
+       && ! timeout 60 "$B/prover9" -f "$W/dc.in" 2>&1 | grep -q "THEOREM PROVED"'
+
+# T7: include() with a name list selects those formulas.  The second argument
+# used to be ignored, so a selective include pulled in the whole file --
+# quietly adding axioms the problem had excluded, which can make an unprovable
+# conjecture provable.
+mkdir -p "$W/ax"
+printf 'fof(i1,axiom, p(a)).\nfof(i2,axiom, q(b)).\nfof(i3,axiom, r(c)).\n' > "$W/ax/M.ax"
+printf "include('ax/M.ax',[i1,i3]).\n" > "$W/sel.p"
+chk "T7  selective include/2 omits the unnamed formulas" \
+    'cd "$W" && timeout 30 "$B/tptp_to_ladr" < sel.p 2>/dev/null \
+       | grep -q "label(i1)" && cd "$W" \
+       && ! timeout 30 "$B/tptp_to_ladr" < sel.p 2>/dev/null | grep -q "label(i2)"'
+printf "include('ax/M.ax').\n" > "$W/all.p"
+chk "T7  plain include/1 still takes the whole file" \
+    'cd "$W" && [ "$(timeout 30 "$B/tptp_to_ladr" < all.p 2>/dev/null \
+       | grep -c "label(i[123])")" = 3 ]'
+
 # T8: the converter has always had branches for TPTP's NAND and NOR, but the
 # parser was never told the operators exist, so any problem using them failed.
 printf 'fof(a,axiom, p(a) ~& q(b) ).\nfof(g,conjecture, ~ (p(a) & q(b)) ).\n' > "$W/nand.p"
