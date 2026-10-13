@@ -159,6 +159,22 @@ sources — holding 83 files that no Makefile references, last touched between
 them, since the first commit is the untouched tarball. See "Removed: upstream's
 in-tree backups" in `FIXES.md` for what they were and why none was load-bearing.
 
+## Capability against the TPTP library
+
+[`ENGINE-NOTES.md`](ENGINE-NOTES.md) is a measured capability baseline over
+the TPTP problem library, written for people building a different reasoner who
+want something to compare against. Prover9 solves **6,423 of 14,070** problems
+whose declared status makes proving the task (45.7%), and Mace4 finds models
+for **1,056 of 2,532** (41.7%), at 30s CPU and 2GB each. Both commit **0
+soundness violations** against TPTP's own declared answers.
+
+The shape matters more than the totals: 71% of Prover9's successes arrive
+within one second, and the solve rate falls from 83.8% on problems TPTP rates
+easiest to 1.5% on those it rates hardest. The weakest domain by a wide margin
+is Commonsense Reasoning — 32 of 548 — which is also the domain whose problems
+come from large hand-built ontologies, 324 of them Cyc-derived. Raw results and
+the harness are in `~/Projects/TPTP/results-prover9mace4/`.
+
 ## Licence
 
 GPL-2.0-only, inherited from upstream — see [`COPYING`](COPYING) for the
