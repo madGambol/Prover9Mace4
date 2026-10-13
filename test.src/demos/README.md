@@ -65,4 +65,5 @@ included there with the same kind of comment, but each needs either a
 sanitizer build, a poisoned allocator or a generated input, so there is no
 single file to read.
 | `perf-fresh-symbol.sh` | `fresh_symbol()` restarted its search on every call | performance |
+| `perf-strbuf-indexing.sh` | `String_buf` indexing walked a chunk list from the head | performance |
 | `arity-ceiling.sh` | `MAX_ARITY` was 255, and the field was narrower than the parameters | wrong results / lost problems |
