@@ -18,6 +18,8 @@
 
 #include "../ladr/top_input.h"
 
+#include <ctype.h>   /* isalnum, for the distinct-object prefix check */
+
 #define PROGRAM_NAME    "tptp_to_ladr"
 #include "../VERSION_DATE.h"
 
@@ -105,9 +107,6 @@ FILE *rewrite_distinct_objects(FILE *fin)
   if (in == NULL) { in = malloc(1); if (in) in[0] = '\0'; }
   in[n] = '\0';
 
-  if (strstr(in, DO_PREFIX) != NULL)
-    Do_prefix_in_input = TRUE;
-
   outcap = n + 1024;
   out = malloc(outcap);
   if (out == NULL) fatal_error("rewrite_distinct_objects, out of memory");
@@ -157,8 +156,17 @@ FILE *rewrite_distinct_objects(FILE *fin)
       free(text);
       for (k = 0; num[k] != '\0'; k++) PUT(num[k]);
     }
-    else
+    else {
+      /* Watch for the generated prefix appearing as a real token.  This has
+	 to be checked here rather than over the whole buffer, because the
+	 buffer includes comments, and a comment that merely mentions the
+	 prefix is not a collision -- TPTP problems are heavily commented. */
+      if ((c == 't' || c == 'T') &&
+	  strncmp(in + i, DO_PREFIX, strlen(DO_PREFIX)) == 0 &&
+	  (i == 0 || (!isalnum((unsigned char) in[i-1]) && in[i-1] != '_')))
+	Do_prefix_in_input = TRUE;
       PUT(in[i++]);
+    }
   }
 #undef PUT
   /* No terminating NUL: fmemopen is given an explicit length, and a NUL in

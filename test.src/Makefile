@@ -47,6 +47,48 @@ check: strbuf_test
 	./regress.sh
 	./mace4_soundness.sh
 
+# Two tiers, split where the cost actually jumps.
+#
+#   tier1  about 2 seconds.  The demonstrations and the semantic translation
+#          matrix.  Fast enough to run on every edit.
+#   tier2  about 2 1/2 minutes.  Everything: the 41 regression tests, the
+#          String_buf unit test, 271 re-verified models, and test1/2/3.
+#
+# Deliberately NOT a sampled tier2: the whole of tier2 costs under three
+# minutes, so sampling it would trade a real chance of missing a regression
+# for about two minutes.  The expensive checks are a tier further out and are
+# not make targets because they need their own corpora -- the sanitizer sweep
+# (about 25 min), the valgrind sweep (about 40 min), and the TPTP oracle and
+# capability runs (hours).  Those belong at the merge-to-rc and release gates.
+#
+# tier2 also accepts BASELINE=<bin dir> and then checks that the defect tests
+# still FAIL there.  A test that passes against the unfixed code is not a
+# regression test, and that is the single mistake this suite has made most
+# often, so it is worth asserting rather than remembering.
+
+tier1:
+	./demos/run.sh
+	./tptp_semantics.sh
+
+tier2: strbuf_test tier1
+	./strbuf_test
+	./regress.sh
+	./mace4_soundness.sh
+	cd .. && $(MAKE) test1 && $(MAKE) test2 && $(MAKE) test3
+	@if [ -n "$(BASELINE)" ]; then \
+	  echo "--- checking the defect tests still fail against $(BASELINE) ---"; \
+	  ./regress.sh "$(BASELINE)" > /tmp/ladr-baseline-run.txt 2>&1; \
+	  n=$$(grep -c '  FAIL  ' /tmp/ladr-baseline-run.txt); \
+	  echo "    $$n of 41 fail against the baseline"; \
+	  if [ "$$n" -lt 30 ]; then \
+	    echo "    TOO FEW: tests that pass on the unfixed code prove nothing"; \
+	    exit 1; \
+	  fi; \
+	fi
+
+demos:
+	./demos/run.sh
+
 tptp_test: tptp_test.o
 	$(CC) $(CFLAGS) -o tptp_test tptp_test.o ../ladr/libladr.a -lm
 
