@@ -20,6 +20,19 @@
 
 /* Private definitions and types */
 
+/* The last cell of a Plist, or NULL for the empty list.  plist_last() returns
+   the last VALUE; the queue in elim_relation() needs the cell. */
+
+static
+Plist plist_last_cell(Plist p)
+{
+  if (p == NULL)
+    return NULL;
+  while (p->next)
+    p = p->next;
+  return p;
+}  /* plist_last_cell */
+
 /*************
  *
  *   rsym_occurrences() - number of occurrences of a pred symbol in a clause
@@ -62,23 +75,48 @@ BOOL arg_check(int symbol, Topform c)
  *
  *************/
 
+/* This used to be eliminable_relation(symbol, clauses, equality), called once
+   per relation symbol by eliminable_relations() below, and each call scanned
+   every clause and every literal.  Once per symbol over all symbols is
+   O(R * L), and the caller then ran that O(R * L) scan once per symbol
+   ELIMINATED, which made predicate elimination O(R^2 * L) -- cubic for a file
+   whose clause count grows with its predicate count.  At 3,000 predicates it
+   was 37.6% of the whole run in a profile, and startup took 68.58 s against
+   1.27 s with predicate_elim cleared.
+
+   What the predicate actually says, per symbol, is:
+
+     - no single clause contains more than one occurrence of it, and
+     - (under equality) no negative occurrence of it has arguments that are
+       not distinct variables
+
+   and ONE pass over the clauses can decide that for every symbol at once.
+   That is what gather_eliminability() does: O(L) rather than O(R * L), with
+   identical results, because it computes exactly the same two facts.
+
+   The counts go in an I2accum (see glist.c), the hash-backed multiset added
+   for PF2, so each symbol's running maximum is an O(1) lookup rather than a
+   list walk. */
+
 static
-BOOL eliminable_relation(int symbol, Plist clauses, BOOL equality)
+void gather_eliminability(Plist clauses, BOOL equality,
+			  I2accum maxocc, I2accum bad)
 {
-  /* Eliminable if no clause has more than one occurrence.
-     Additional constraint for equality: all negative occurrences
-     have unique vars as args.
-  */
   Plist p;
   for (p = clauses; p; p = p->next) {
-    int n = rsym_occurrences(symbol, p->v);
-    if (n > 1)
-      return FALSE;
-    else if (equality && !arg_check(symbol, p->v))
-      return FALSE;
+    Topform c = p->v;
+    Literals lit;
+    for (lit = c->literals; lit; lit = lit->next) {
+      int sym = SYMNUM(lit->atom);
+      int n = rsym_occurrences(sym, c);   /* O(literals in this clause) */
+      int cur = i2accum_occurrences(maxocc, sym);
+      if (n > cur)
+	i2accum_add_n(maxocc, sym, n - cur);   /* keep the running maximum */
+      if (equality && !lit->sign && !args_distinct_vars(lit->atom))
+	i2accum_add(bad, sym);
+    }
   }
-  return TRUE;
-}  /* eliminable_relation */
+}  /* gather_eliminability */
 
 /*************
  *
@@ -90,16 +128,35 @@ static
 Ilist eliminable_relations(Plist clauses, BOOL equality)
 {
   Ilist rsyms = rsym_set_in_topforms(clauses);
-  Ilist eliminable = NULL;
+  I2accum maxocc = get_i2accum();
+  I2accum bad = get_i2accum();
+  Ilist eliminable = NULL, tail = NULL;
   Ilist p;
-  for (p = rsyms; p; p = p->next) {
-    if (!is_eq_symbol(p->i) &&          /* don't allow equalities */
-	sn_to_arity(p->i) != 0 &&      /* don't allow prop atoms */
-	eliminable_relation(p->i, clauses, equality))
 
-      eliminable = ilist_append(eliminable, p->i); 
+  gather_eliminability(clauses, equality, maxocc, bad);
+
+  for (p = rsyms; p; p = p->next) {
+    if (!is_eq_symbol(p->i) &&               /* don't allow equalities */
+	sn_to_arity(p->i) != 0 &&            /* don't allow prop atoms */
+	i2accum_occurrences(maxocc, p->i) <= 1 &&
+	(!equality || i2accum_occurrences(bad, p->i) == 0)) {
+      /* ilist_append walks to the tail, so appending in a loop is quadratic
+	 in the number of eliminable symbols; keep the tail instead.  rsyms is
+	 traversed in the same order as before, so the result list is the same
+	 list, which matters because the caller uses its FIRST element. */
+      Ilist g = get_ilist();
+      g->i = p->i;
+      g->next = NULL;
+      if (tail)
+	tail->next = g;
+      else
+	eliminable = g;
+      tail = g;
+    }
   }
   zap_ilist(rsyms);
+  zap_i2accum(maxocc);
+  zap_i2accum(bad);
   return eliminable;
 }  /* eliminable_relations */
 
@@ -152,9 +209,22 @@ Plist gen_given(int symbol, Topform given, Plist usable)
 {
   Plist new = NULL;
   Plist p;
+
+  /* resolve_on_symbol() requires a literal with this symnum in BOTH clauses,
+     so a clause that does not contain the symbol yields nothing -- including
+     no clause-id assignment, since that happens inside the same test.
+     Skipping those is therefore result-preserving, and it is what turns the
+     all-pairs scan into a scan over only the clauses that mention the symbol.
+     Everything still goes into `usable` below; only resolution is skipped. */
+  if (rsym_occurrences(symbol, given) == 0)
+    return NULL;
+
   for (p = usable; p; p = p->next) {
     Topform c = p->v;
-    Plist resolvents = resolve_on_symbol(symbol, given, c);
+    Plist resolvents;
+    if (rsym_occurrences(symbol, c) == 0)
+      continue;
+    resolvents = resolve_on_symbol(symbol, given, c);
     new = plist_cat(new, resolvents);
   }
   return new;
@@ -169,12 +239,13 @@ Plist gen_given(int symbol, Topform given, Plist usable)
 static
 BOOL subsumed_by_member(Topform c, Plist p)
 {
-  if (p == NULL)
-    return FALSE;
-  else if (subsumes(p->v, c))
-    return TRUE;
-  else
-    return subsumed_by_member(c, p->next);
+  /* Was recursive, one frame per clause in sos; see PF5 in ../FIXES.md for
+     why that is a crash and not just a style. */
+  Plist q;
+  for (q = p; q; q = q->next)
+    if (subsumes(q->v, c))
+      return TRUE;
+  return FALSE;
 }  /* subsumed_by_member */
 
 /*************
@@ -183,19 +254,34 @@ BOOL subsumed_by_member(Topform c, Plist p)
  *
  *************/
 
+/* sos is a queue: elim_relation() pops the head and appends at the tail.
+   plist_append() walks to the tail, so appending once per derived clause cost
+   O(|sos|) each time and the loop in elim_relation() was quadratic in the
+   clause count -- 9,000,012 plist_append calls and 22.4% of the profile at
+   3,000 predicates.  Threading the tail pointer through makes each append
+   O(1).  Nothing else changes: the subsumption test still sees the clauses
+   appended earlier in this same call, exactly as it did when sos was
+   reassigned each time. */
+
 static
-Plist incorporate_new_clauses(Plist sos, Plist new, BOOL echo)
+void incorporate_new_clauses(Plist *sos, Plist *sos_tail, Plist new, BOOL echo)
 {
   Plist p;
   for (p = new; p; p = p->next) {
-    if (!subsumed_by_member(p->v, sos)) {
-      sos = plist_append(sos, p->v);
+    if (!subsumed_by_member(p->v, *sos)) {
+      Plist g = get_plist();
+      g->v = p->v;
+      g->next = NULL;
+      if (*sos_tail)
+	(*sos_tail)->next = g;
+      else
+	*sos = g;
+      *sos_tail = g;
       printf("Derived: ");
       fwrite_clause(stdout, p->v, CL_FORM_STD);
     }
   }
   zap_plist(new);
-  return sos;
 }  /* incorporate_new_clauses */
 
 /*************
@@ -208,27 +294,49 @@ static
 Plist elim_relation(int symbol, Plist sos, Clist disabled, BOOL echo)
 {
   /* this does a naive given-clause loop */
-  Plist usable = NULL;
+  Plist usable = NULL, usable_tail = NULL;
+  Plist sos_tail = plist_last_cell(sos);
   while (sos) {
     Plist new;
     Topform given = sos->v;
+    if (sos->next == NULL)
+      sos_tail = NULL;          /* popping the last cell empties the queue */
     sos = plist_pop(sos);
-    usable = plist_append(usable, given);
+    {
+      /* usable = plist_append(usable, given), with the tail kept: the walk
+	 this replaces made the loop quadratic in the clause count. */
+      Plist g = get_plist();
+      g->v = given;
+      g->next = NULL;
+      if (usable_tail)
+	usable_tail->next = g;
+      else
+	usable = g;
+      usable_tail = g;
+    }
 #ifdef GEN_DEBUG
     printf("\ngiven: "); f_clause(given);
 #endif
     new = gen_given(symbol, given, usable);
-    sos = incorporate_new_clauses(sos, new, echo);
+    incorporate_new_clauses(&sos, &sos_tail, new, echo);
   }
   /* partition usable into clauses with and without symbol */
   {
-    Plist without = NULL;
+    Plist without = NULL, without_tail = NULL;
     Plist p;
     for (p = usable; p; p = p->next) {
       if (rsym_occurrences(symbol, p->v) > 0)
 	clist_append(p->v, disabled);
-      else
-	without = plist_append(without, p->v);
+      else {
+	Plist g = get_plist();
+	g->v = p->v;
+	g->next = NULL;
+	if (without_tail)
+	  without_tail->next = g;
+	else
+	  without = g;
+	without_tail = g;
+      }
     }
     zap_plist(usable);
     return without;

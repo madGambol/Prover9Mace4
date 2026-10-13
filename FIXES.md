@@ -43,9 +43,10 @@ defaults to `-std=gnu23`.
 | T3 | ...and that put a 4953-byte array in five frames, one of them recursive, cutting circular-`include()` depth from 40262 to 1651. The message is now measured with `snprintf(NULL,0,...)` and allocated to fit: no array, no truncation at any length, depth 87255 | `ladr/fatal.c`, 5 call sites | hardening |
 | PF1 | `String_buf` append is O(n²) | `ladr/strbuf.c` | performance |
 | PF2 | symbol multiset built and read back by linear search | `ladr/glist.c` | performance |
-| PF3 | `predicate_elimination` is O(R³); recomputes the whole candidate set per symbol | `provers.src/pred_elim.c` | performance (found, not fixed) |
+| PF3 | `predicate_elimination` is O(R³); recomputes the whole candidate set per symbol | `provers.src/pred_elim.c` | performance |
 | PF4 | feature vector / FPA indexing is sized by the symbol table, not the clause | `ladr/features.c` | performance (found, not fixed) |
 | PF5 | 40 list functions recursed once per element; 10 crash at 400,000 | `ladr/glist.c` | crash at scale |
+| PF6 | `logic_term()` compares connective NAMES, 161M `str_ident` calls | `ladr/formula.c` | performance (found, not fixed) |
 | X1–X5 | All 4 installed helper scripts are unrunnable | `utilities/` | broken tooling |
 | L1 | `demod1` drops a term its callee may have freed | `ladr/demod.c:376` | latent, reported only |
 
@@ -1320,7 +1321,7 @@ abstraction it introduces, are worth more than the ratio: PF3's fix needs the
 same accumulator.
 
 ### PF3 — `predicate_elimination` is O(R³) in the number of relation symbols
-`provers.src/pred_elim.c` — **found but not yet fixed**
+`provers.src/pred_elim.c`
 
 `predicate_elimination` is on by default (`auto_setup` implies
 `predicate_elim`) and runs whenever `usable` is empty, which is the ordinary
@@ -1341,14 +1342,75 @@ recomputed — and each recomputation calls `eliminable_relation()` once per
 relation symbol, with each of those calls scanning every clause and every
 literal. So R rounds × R symbols × L literals.
 
-Recomputation is not gratuitous: eliminating one relation can make another
-eliminable or stop it being so. But the *inner* quadratic is pure waste. What
-`eliminable_relation()` decides, per symbol, is "no clause contains more than
-one occurrence, and (under equality) no negative occurrence has non-distinct
-variable arguments" — and a single pass over all clauses can decide that for
-every symbol at once, which is O(L) instead of O(R·L), with identical results.
-That turns O(R²·L) per round into O(L). `I2accum` from PF2 is the structure for
-it.
+There were two further costs on top of that. `elim_relation()` ran a
+given-clause loop in which `usable` grew by `plist_append()`, which walks to
+the tail — *n* appends to a list growing to *n*, once per round, which is the
+9,000,012 `plist_append` calls and 22.4% below. And it resolved each given
+clause against *every* clause in `usable`, when only clauses mentioning the
+symbol can possibly resolve on it.
+
+**Fix** — three changes, none of which alters which predicates get eliminated:
+
+1. One pass over the clauses decides, for every symbol at once, the two facts
+   `eliminable_relation()` was computing per symbol: the greatest number of
+   occurrences in any single clause, and whether any negative occurrence has
+   arguments that are not distinct variables. O(L) instead of O(R·L), with
+   identical results because it is the same predicate. The per-symbol counts
+   live in an `I2accum` — the structure added for PF2 — so each lookup is O(1).
+
+2. The given-clause queue and the `usable`, `without` and `eliminable` lists
+   each keep a tail pointer, so every append is O(1) rather than a walk.
+
+3. `gen_given()` returns at once for a clause that does not contain the symbol,
+   and skips those in `usable`. This is result-preserving rather than an
+   approximation: `resolve_on_symbol()` requires a literal with the symbol in
+   **both** clauses, and the clause-id assignment it performs sits inside that
+   same test, so a skipped pair produced nothing before either. The identical
+   clause IDs in the `resolve(...)` justifications confirm it.
+
+**What is deliberately not changed is the driver loop.** Recomputation is not
+gratuitous — eliminating one relation can make another eliminable, or stop it
+being so — and any scheme that reuses the candidate list across rounds changes
+which symbols are eliminated and in what order. So there is still one round per
+symbol, each round now O(L): **quadratic rather than cubic.**
+
+Measured, Prover9 startup with default settings:
+
+| symbols | before | after | speedup |
+| --- | --- | --- | --- |
+| 1 000 | 0.49 s | 0.04 s | 12x |
+| 2 000 | 3.84 s | 0.15 s | 26x |
+| 4 000 | 29.57 s | 0.54 s | 55x |
+| 8 000 | 263.04 s | 2.49 s | **106x** |
+| 16 000 | >300 s (killed at the CPU limit) | 11.73 s | — |
+
+The before column multiplies by about eight for each doubling, which is cubic;
+the after column by about four, which is quadratic. The 16 000 row is a floor,
+not a ratio.
+
+Startup with predicate elimination *working* is now faster than startup with it
+switched off — 11.73 s against 19.48 s at 16 000 symbols — because eliminating
+predicates removes clauses, so everything downstream has less to index.
+
+After the fix, gprof at 8 000 symbols:
+
+```
+ 14.65%  i2accum_add_n            96044000 calls
+ 14.34%  lookup_by_id            480484252 calls
+  6.49%  is_symbol               320368173 calls
+  5.93%  i2accum_probe           288824960 calls
+  3.71%  predicate_elimination           1 call   (6.15 s cumulative, was 82.33 s)
+  2.84%  eliminable_relations         8001 calls  (was 37.58% at 3000 symbols)
+```
+
+`eliminable_relations` is down from 37.6% to 2.8%, and `predicate_elimination`
+from 82.33 s cumulative to 6.15 s. The 8 001 rounds are the driver loop above,
+and each still calls `rsym_set_in_topforms()` over every clause: that is the
+remaining quadratic. `test.src/demos/perf-predicate-elim.sh` reproduces all of
+this.
+
+Behaviour: on the 174 corpus runs that both self-terminate and do not stop on a
+timer, A/A differs on 0 and A/B differs on 0.
 
 Measured, 3 000 predicates, gprof on the fixed build:
 
@@ -1390,10 +1452,28 @@ The feature vector appears to be sized by the symbol count rather than by the
 clause, which is the wrong shape for a knowledge base with many predicates and
 few literals each.
 
-Neither PF3 nor PF4 is fixed here. They are recorded because they were found
-by measuring PF2, they are both on the input path that a large knowledge base
-takes, and PF3 in particular is a 54x effect that any work on scale should
-start with.
+### PF6 — `logic_term()` identifies connectives by comparing symbol names
+`ladr/formula.c` — **found but not fixed**
+
+`logic_term()` asks whether a term is one of the logical connectives, and does
+it with up to seven `is_term(t, "...", 2)` calls:
+
+```c
+return (is_term(t, not_sym(), 1) || is_term(t, and_sym(), 2) ||
+        is_term(t, or_sym(), 2)  || is_term(t, imp_sym(), 2) || ...);
+```
+
+Each `is_term` resolves a symbol name and compares strings. In the profile
+above that is 32 020 000 `logic_term` calls producing 320 320 146 `is_term`,
+480 484 252 `lookup_by_id` and 161 220 029 `str_ident` calls — together about a
+quarter of the run. The connective symnums are fixed once the symbol table is
+built, so caching them and comparing integers would remove essentially all of
+it. Left alone here because it touches the formula representation that
+everything else in the tree reads, and PF3 was the larger effect.
+
+PF4 and PF6 are recorded rather than fixed. Both are on the input path that a
+large knowledge base takes, and both were found by measuring something else —
+which is the argument for measuring before optimising, not after.
 
 ### PF5 — forty list functions recursed once per element
 `ladr/glist.c`
