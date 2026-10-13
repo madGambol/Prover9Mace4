@@ -45,6 +45,7 @@ defaults to `-std=gnu23`.
 | PF2 | symbol multiset built and read back by linear search | `ladr/glist.c` | performance |
 | PF3 | `predicate_elimination` is O(R³); recomputes the whole candidate set per symbol | `provers.src/pred_elim.c` | performance (found, not fixed) |
 | PF4 | feature vector / FPA indexing is sized by the symbol table, not the clause | `ladr/features.c` | performance (found, not fixed) |
+| PF5 | 40 list functions recursed once per element; 10 crash at 400,000 | `ladr/glist.c` | crash at scale |
 | X1–X5 | All 4 installed helper scripts are unrunnable | `utilities/` | broken tooling |
 | L1 | `demod1` drops a term its callee may have freed | `ladr/demod.c:376` | latent, reported only |
 
@@ -1393,6 +1394,81 @@ Neither PF3 nor PF4 is fixed here. They are recorded because they were found
 by measuring PF2, they are both on the input path that a large knowledge base
 takes, and PF3 in particular is a 54x effect that any work on scale should
 start with.
+
+### PF5 — forty list functions recursed once per element
+`ladr/glist.c`
+
+Forty of the functions in `glist.c` recursed once per list element. It is the
+house style of the file, and at a list of ten it is the clearest way to write
+them:
+
+```c
+Plist plist_append(Plist lst, void *v)
+{
+  if (lst == NULL) { Plist g = get_plist(); g->v = v; g->next = NULL; return g; }
+  else { lst->next = plist_append(lst->next, v); return lst; }
+}
+```
+
+The frame is about 48 bytes, so the 8 MB default stack runs out somewhere near
+170,000 elements and the process dies with no diagnostic at all — no message,
+no informative exit status, just SIGSEGV. These lists hold clauses and symbols,
+so their length is the size of the input. This is the same defect as PF2, and
+PF2 was first seen as exactly this: an unexplained crash at 250,000 symbols.
+
+**Not all forty actually crashed, and the reason matters.** Where the recursive
+call is in tail position — `ilist_member`, `assoc`, `plist_last`,
+`rev_app_ilist`, and most of the other scans — gcc at `-O` turns it into a loop
+on its own, so those never overflowed in a release build. The ones that crash
+are the ones that must do something *after* the call returns, which is most of
+the list-building and list-editing functions. Measured on a 400,000-element
+list with an 8 MB stack, both sides compiled `-O`:
+
+| function | before | after |
+| --- | --- | --- |
+| `ilist_append` | SIGSEGV | ok |
+| `plist_append` | SIGSEGV | ok |
+| `ilist_copy` | SIGSEGV | ok |
+| `ilist_occurrences` | SIGSEGV | ok |
+| `longest_string_in_plist` | SIGSEGV | ok |
+| `ilist_removeall` | SIGSEGV | ok |
+| `ilist_remove_last` | SIGSEGV | ok |
+| `plist_remove_last` | SIGSEGV | ok |
+| `ilist_insert_up` | SIGSEGV | ok |
+| `multiset_to_set` | SIGSEGV | ok |
+
+Ten of the twelve probed. (`position_in_ilist` and `ilist_cat2` survived; gcc
+evidently found an accumulator form for those two.) Relying on the compiler to
+rescue the rest is not a plan — it does not happen at `-O0`, which is what
+`test.src` itself builds with — so **all forty are loops now**. No signature
+changed and no caller changed.
+
+**The two genuine traps.** `ilist_set` and `ilist_rem_dups` built their result
+from the *tail* backwards and dropped an element when its value was already in
+the set built from the suffix, which means they keep the **last** occurrence of
+each value, not the first:
+
+```
+ilist_set([3,1,4,1,5,9,2,6,5,3,5])  =  [4,1,9,2,6,3,5]
+```
+
+A forward loop written the obvious way keeps the first occurrence and returns
+`[3,1,4,5,9,2,6]` — same length, same values, a different list, and nothing in
+the file documents which was intended. The equivalent forward test is "does
+this value occur *later*", which is what the code does now. `alist2_remove` was
+the same shape: it fixed up the tail before testing the head.
+
+**Verification.** `test.src/glist_test.c` is a transcript test: the expected
+output was produced by the recursive implementation *before* the change and is
+compared literally, so every value in it is evidence rather than an assertion
+about what the functions ought to do. A differential probe over all forty gave
+identical output across **54 transcript lines**. The eight measured crashers
+are then exercised on 400,000-element lists.
+
+Behaviour over the corpus: on the 174 runs that both self-terminate *and* do
+not stop on a timer, A/A differs on 0 and A/B differs on **0** — byte-identical
+everywhere, the `max_megs` pair included, because this change allocates the
+same cells and only walks them differently.
 
 ---
 

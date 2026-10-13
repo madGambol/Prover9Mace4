@@ -12,7 +12,7 @@ CFLAGS = $(XFLAGS) -g  -O0 -Wall
 # CFLAGS = $(XFLAGS)  -Wall -pedantic
 
 PROGRAMS = avltest strbuf_test memory_test arity_test varnum_test bool_test \
-           multiset_test
+           multiset_test glist_test
 
 all: ladr apps
 
@@ -41,6 +41,12 @@ strbuf_test: strbuf_test.o
 bool_test: bool_test.o
 	$(CC) $(CFLAGS) -o bool_test bool_test.o ../ladr/libladr.a -lm
 
+# Checks the 40 list functions that used to recurse once per element: the
+# transcript must match what the recursive versions produced, byte for byte,
+# and a 400,000-element list must not overflow the stack; under a second.
+glist_test: glist_test.o
+	$(CC) $(CFLAGS) -o glist_test glist_test.o ../ladr/libladr.a -lm
+
 # Checks the symbol-multiset packages: that the hash accumulator agrees with
 # the list implementation element for element and IN ORDER (precedence, and so
 # every proof, depends on that order), and that neither is quadratic or
@@ -66,11 +72,12 @@ memory_test: memory_test.o
 #   mace4_soundness.sh - every model Mace4 reports really does satisfy the
 #                        input clauses (checked independently by clausetester)
 # Each accepts a bin directory, e.g.  ./regress.sh /path/to/other/bin
-check: strbuf_test memory_test arity_test varnum_test bool_test multiset_test
+check: strbuf_test memory_test arity_test varnum_test bool_test multiset_test glist_test
 	./arity_test
 	./varnum_test
 	./bool_test
 	./multiset_test
+	./glist_test
 	./strbuf_test
 	./memory_test
 	./regress.sh
@@ -95,11 +102,12 @@ check: strbuf_test memory_test arity_test varnum_test bool_test multiset_test
 # regression test, and that is the single mistake this suite has made most
 # often, so it is worth asserting rather than remembering.
 
-tier1: arity_test varnum_test bool_test multiset_test
+tier1: arity_test varnum_test bool_test multiset_test glist_test
 	./arity_test
 	./varnum_test
 	./bool_test
 	./multiset_test
+	./glist_test
 	./demos/run.sh
 	./tptp_semantics.sh
 
