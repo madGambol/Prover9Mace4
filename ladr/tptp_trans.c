@@ -179,6 +179,15 @@ void declare_tptp_input_types(void)
   declare_parse_type("<=>", 505, INFIX);
   declare_parse_type("<~>", 505, INFIX);
 
+  /* NAND and NOR.  tptp3_to_ladr_term() has always had conversion branches
+     for "~&" and "~|", but they were unreachable because the parser was never
+     told the operators exist, so every problem using them failed to translate.
+     TPTP's grammar groups them with the other non-associative connectives
+     (<=>, =>, <=, <~>), which is where <~> is declared. */
+
+  declare_parse_type("~|",  505, INFIX);
+  declare_parse_type("~&",  505, INFIX);
+
   /* Other things */
 
   set_cons_char('\0');  /* Don't recognize list cons */
