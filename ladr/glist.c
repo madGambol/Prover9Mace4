@@ -331,15 +331,13 @@ int plist_count(Plist p)
 static
 Plist rev_app_plist(Plist p1, Plist p2)
 {
-  Plist p3;
-
-  if (p1 == NULL)
-    return(p2);
-  else {
-    p3 = p1->next;
+  while (p1 != NULL) {
+    Plist p3 = p1->next;
     p1->next = p2;
-    return(rev_app_plist(p3, p1));
+    p2 = p1;
+    p1 = p3;
   }
+  return p2;
 }  /* rev_app_plist */
 
 /*************
@@ -431,16 +429,16 @@ is returned.
 /* PUBLIC */
 Plist plist_append(Plist lst, void *v)
 {
-  if (lst == NULL) {
-    Plist g = get_plist();
-    g->v = v;
-    g->next = NULL;
+  Plist g = get_plist();
+  Plist p;
+  g->v = v;
+  g->next = NULL;
+  if (lst == NULL)
     return g;
-  }
-  else {
-    lst->next = plist_append(lst->next, v);
-    return lst;
-  }
+  for (p = lst; p->next; p = p->next)
+    ;
+  p->next = g;
+  return lst;
 }  /* plist_append */
 
 /*************
@@ -476,12 +474,11 @@ This function checks if a pointer is a member of a Plist.
 /* PUBLIC */
 BOOL plist_member(Plist lst, void *v)
 {
-  if (lst == NULL)
-    return FALSE;
-  else if (lst->v == v)
-    return TRUE;
-  else
-    return plist_member(lst->next, v);
+  Plist p;
+  for (p = lst; p; p = p->next)
+    if (p->v == v)
+      return TRUE;
+  return FALSE;
 }  /* plist_member */
 
 /*************
@@ -499,15 +496,19 @@ The arguments are not changed.
 /* PUBLIC */
 Plist plist_subtract(Plist p1, Plist p2)
 {
-  if (p1 == NULL)
-    return NULL;
-  else {
-    Plist r = plist_subtract(p1->next, p2);
-    if (plist_member(p2, p1->v))
-      return r;
-    else
-      return plist_prepend(r, p1->v);
-  }
+  /* The recursive version built the result from the tail back and prepended,
+     which leaves it in p1's order; appending at a tail pointer does the same
+     thing forwards.  New cells, p1 untouched, as before. */
+  Plist head = NULL, tail = NULL, p;
+  for (p = p1; p; p = p->next)
+    if (!plist_member(p2, p->v)) {
+      Plist g = get_plist();
+      g->v = p->v;
+      g->next = NULL;
+      if (tail) tail->next = g; else head = g;
+      tail = g;
+    }
+  return head;
 }  /* plist_subtract */
 
 /*************
@@ -522,12 +523,11 @@ Plist plist_subtract(Plist p1, Plist p2)
 /* PUBLIC */
 BOOL plist_subset(Plist a, Plist b)
 {
-  if (a == NULL)
-    return TRUE;
-  else if (!plist_member(b, a->v))
-    return FALSE;
-  else
-    return plist_subset(a->next, b);
+  Plist p;
+  for (p = a; p; p = p->next)
+    if (!plist_member(b, p->v))
+      return FALSE;
+  return TRUE;
 }  /* plist_subset */
 
 /*************
@@ -543,19 +543,15 @@ Remove the first occurrence of a pointer from a Plist.
 /* PUBLIC */
 Plist plist_remove(Plist p, void *v)
 {
-  if (p == NULL)
-    fatal_error("plist_remove: pointer not found");
-
-  if (p->v == v) {
-    Plist x = p;
-    p = p->next;
-    free_plist(x);
-    return p;
-  }
-  else {
-    p->next = plist_remove(p->next, v);
-    return p;
-  }
+  Plist q, prev;
+  for (q = p, prev = NULL; q; prev = q, q = q->next)
+    if (q->v == v) {
+      if (prev) prev->next = q->next; else p = q->next;
+      free_plist(q);
+      return p;
+    }
+  fatal_error("plist_remove: pointer not found");
+  return p;  /* not reached */
 }  /* plist_remove */
 
 /*************
@@ -571,19 +567,15 @@ Remove the first occurrence of a pointer from a Plist.
 /* PUBLIC */
 Plist plist_remove_string(Plist p, char *s)
 {
-  if (p == NULL)
-    fatal_error("plist_remove_string: pointer not found");
-
-  if (str_ident(p->v, s)) {
-    Plist x = p;
-    p = p->next;
-    free_plist(x);
-    return p;
-  }
-  else {
-    p->next = plist_remove_string(p->next, s);
-    return p;
-  }
+  Plist q, prev;
+  for (q = p, prev = NULL; q; prev = q, q = q->next)
+    if (str_ident(q->v, s)) {
+      if (prev) prev->next = q->next; else p = q->next;
+      free_plist(q);
+      return p;
+    }
+  fatal_error("plist_remove_string: pointer not found");
+  return p;  /* not reached */
 }  /* plist_remove_string */
 
 /*************
@@ -623,16 +615,18 @@ Plist sort_plist(Plist objects,	Ordertype (*comp_proc) (void *, void *))
 /* PUBLIC */
 Plist plist_remove_last(Plist p)
 {
+  Plist q, prev;
   if (p == NULL)
     return NULL;
-  else if (p->next == NULL) {
-    free_plist(p);
+  for (q = p, prev = NULL; q->next; prev = q, q = q->next)
+    ;
+  if (prev == NULL) {
+    free_plist(q);
     return NULL;
   }
-  else {
-    p->next = plist_remove_last(p->next);
-    return p;
-  }
+  prev->next = NULL;
+  free_plist(q);
+  return p;
 }  /* plist_remove_last */
 
 /*************
@@ -648,17 +642,12 @@ Count from 1; return -1 if the string is not in the Plist.
 /* PUBLIC */
 int position_of_string_in_plist(char *s, Plist p)
 {
-  if (p == NULL)
-    return -1;
-  else if (str_ident(s, p->v))
-    return 1;
-  else {
-    int pos = position_of_string_in_plist(s, p->next);
-    if (pos == -1)
-      return -1;
-    else
-      return pos+1;
-  }
+  Plist q;
+  int pos = 1;
+  for (q = p; q; q = q->next, pos++)
+    if (str_ident(s, q->v))
+      return pos;
+  return -1;
 }  /* position_of_string_in_plist */
 
 /*************
@@ -689,13 +678,11 @@ Return -1 if the Plist is empty.
 /* PUBLIC */
 int longest_string_in_plist(Plist p)
 {
-  if (p == NULL)
-    return -1;
-  else {
-    int n1 = strlen(p->v);
-    int n2 = longest_string_in_plist(p->next);
-    return IMAX(n1,n2);
-  }
+  Plist q;
+  int n = -1;
+  for (q = p; q; q = q->next)
+    n = IMAX((int) strlen(q->v), n);
+  return n;
 }  /* longest_string_in_plist */
 
 /*************
@@ -710,12 +697,13 @@ int longest_string_in_plist(Plist p)
 /* PUBLIC */
 void *ith_in_plist(Plist p, int i)
 {
-  if (p == NULL || i <= 0)
+  Plist q;
+  if (i <= 0)
     return NULL;
-  else if (i == 1)
-    return p->v;
-  else
-    return ith_in_plist(p->next, i-1);
+  for (q = p; q; q = q->next, i--)
+    if (i == 1)
+      return q->v;
+  return NULL;
 }  /* ith_in_plist */
 
 /*************
@@ -730,12 +718,12 @@ void *ith_in_plist(Plist p, int i)
 /* PUBLIC */
 void *plist_last(Plist p)
 {
+  Plist q;
   if (p == NULL)
     return NULL;
-  else if (p->next == NULL)
-    return p->v;
-  else
-    return plist_last(p->next);
+  for (q = p; q->next; q = q->next)
+    ;
+  return q->v;
 }  /* plist_last */
 
 /*****************************************************************************/
@@ -787,12 +775,13 @@ but p2 is not.
 /* PUBLIC */
 Ilist ilist_cat2(Ilist p1, Ilist p2)
 {
+  Ilist p;
   if (p1 == NULL)
     return copy_ilist(p2);
-  else {
-    p1->next = ilist_cat2(p1->next, p2);
-    return p1;
-  }
+  for (p = p1; p->next; p = p->next)
+    ;
+  p->next = copy_ilist(p2);
+  return p1;
 }  /* ilist_cat2 */
 
 /*************
@@ -842,15 +831,13 @@ int ilist_count(Ilist p)
 static
 Ilist rev_app_ilist(Ilist p1, Ilist p2)
 {
-  Ilist p3;
-
-  if (p1 == NULL)
-    return(p2);
-  else {
-    p3 = p1->next;
+  while (p1 != NULL) {
+    Ilist p3 = p1->next;
     p1->next = p2;
-    return(rev_app_ilist(p3, p1));
+    p2 = p1;
+    p1 = p3;
   }
+  return p2;
 }  /* rev_app_ilist */
 
 /*************
@@ -941,16 +928,16 @@ is returned.
 /* PUBLIC */
 Ilist ilist_append(Ilist lst, int i)
 {
-  if (lst == NULL) {
-    Ilist g = get_ilist();
-    g->i = i;
-    g->next = NULL;
+  Ilist g = get_ilist();
+  Ilist p;
+  g->i = i;
+  g->next = NULL;
+  if (lst == NULL)
     return g;
-  }
-  else {
-    lst->next = ilist_append(lst->next, i);
-    return lst;
-  }
+  for (p = lst; p->next; p = p->next)
+    ;
+  p->next = g;
+  return lst;
 }  /* ilist_append */
 
 /*************
@@ -985,12 +972,12 @@ Ilist ilist_prepend(Ilist lst, int i)
 /* PUBLIC */
 Ilist ilist_last(Ilist lst)
 {
+  Ilist p;
   if (lst == NULL)
     return NULL;
-  else if (lst->next == NULL)
-    return lst;
-  else
-    return ilist_last(lst->next);
+  for (p = lst; p->next; p = p->next)
+    ;
+  return p;
 }  /* ilist_last */
 
 /*************
@@ -1008,12 +995,11 @@ the result is undefined.)
 /* PUBLIC */
 BOOL ilist_member(Ilist lst, int i)
 {
-  if (lst == NULL)
-    return FALSE;
-  else if (lst->i == i)
-    return TRUE;
-  else
-    return ilist_member(lst->next, i);
+  Ilist p;
+  for (p = lst; p; p = p->next)
+    if (p->i == i)
+      return TRUE;
+  return FALSE;
 }  /* ilist_member */
 
 /*************
@@ -1031,15 +1017,16 @@ The arguments are not changed.
 /* PUBLIC */
 Ilist ilist_subtract(Ilist p1, Ilist p2)
 {
-  if (p1 == NULL)
-    return NULL;
-  else {
-    Ilist r = ilist_subtract(p1->next, p2);
-    if (ilist_member(p2, p1->i))
-      return r;
-    else
-      return ilist_prepend(r, p1->i);
-  }
+  Ilist head = NULL, tail = NULL, p;
+  for (p = p1; p; p = p->next)
+    if (!ilist_member(p2, p->i)) {
+      Ilist g = get_ilist();
+      g->i = p->i;
+      g->next = NULL;
+      if (tail) tail->next = g; else head = g;
+      tail = g;
+    }
+  return head;
 }  /* ilist_subtract */
 
 /*************
@@ -1057,17 +1044,17 @@ The argument is "used up".
 /* PUBLIC */
 Ilist ilist_removeall(Ilist p, int i)
 {
-  if (p == NULL)
-    return NULL;
-  else if (p->i == i) {
-    Ilist r = p->next;
-    free_ilist(p);
-    return ilist_removeall(r, i);
+  Ilist q, prev, next;
+  for (q = p, prev = NULL; q; q = next) {
+    next = q->next;
+    if (q->i == i) {
+      if (prev) prev->next = next; else p = next;
+      free_ilist(q);
+    }
+    else
+      prev = q;
   }
-  else {
-    p->next = ilist_removeall(p->next, i);
-    return p;
-  }
+  return p;
 }  /* ilist_removeall */
 
 /*************
@@ -1136,15 +1123,21 @@ Don't make any assumptions about the order of the result.
 /* PUBLIC */
 Ilist ilist_set(Ilist m)
 {
-  if (m == NULL)
-    return NULL;
-  else {
-    Ilist s = ilist_set(m->next);
-    if (ilist_member(s, m->i))
-      return s;
-    else
-      return ilist_prepend(s, m->i);
-  }
+  /* The recursive version worked from the tail back, dropping an element when
+     its value was already in the set built from the suffix -- that is, when
+     the value occurs again LATER.  So the equivalent forward test is "does
+     this value appear later in the list"; the elements kept, and their order,
+     are identical.  New cells; m is left alone, as before. */
+  Ilist head = NULL, tail = NULL, p;
+  for (p = m; p; p = p->next)
+    if (!ilist_member(p->next, p->i)) {
+      Ilist g = get_ilist();
+      g->i = p->i;
+      g->next = NULL;
+      if (tail) tail->next = g; else head = g;
+      tail = g;
+    }
+  return head;
 }  /* ilist_set */
 
 /*************
@@ -1162,19 +1155,21 @@ This version "uses up" the argument.
 /* PUBLIC */
 Ilist ilist_rem_dups(Ilist m)
 {
-  if (m == NULL)
-    return NULL;
-  else {
-    Ilist s = ilist_rem_dups(m->next);
-    if (ilist_member(s, m->i)) {
-      free_ilist(m);
-      return s;
+  /* Same rule as ilist_set -- keep the last occurrence of each value -- but
+     destructively, freeing the cells it drops.  See the comment there for why
+     "already in the set built from the suffix" and "occurs again later" are
+     the same test. */
+  Ilist q, prev, next;
+  for (q = m, prev = NULL; q; q = next) {
+    next = q->next;
+    if (ilist_member(next, q->i)) {
+      if (prev) prev->next = next; else m = next;
+      free_ilist(q);
     }
-    else {
-      m->next = s;
-      return m;
-    }
+    else
+      prev = q;
   }
+  return m;
 }  /* ilist_rem_dups */
 
 /*************
@@ -1189,12 +1184,11 @@ Ilist ilist_rem_dups(Ilist m)
 /* PUBLIC */
 BOOL ilist_is_set(Ilist a)
 {
-  if (a == NULL)
-    return TRUE;
-  else if (ilist_member(a->next, a->i))
-    return FALSE;
-  else
-    return ilist_is_set(a->next);
+  Ilist p;
+  for (p = a; p; p = p->next)
+    if (ilist_member(p->next, p->i))
+      return FALSE;
+  return TRUE;
 }  /* ilist_is_set */
 
 /*************
@@ -1209,12 +1203,11 @@ BOOL ilist_is_set(Ilist a)
 /* PUBLIC */
 BOOL ilist_subset(Ilist a, Ilist b)
 {
-  if (a == NULL)
-    return TRUE;
-  else if (!ilist_member(b, a->i))
-    return FALSE;
-  else
-    return ilist_subset(a->next, b);
+  Ilist p;
+  for (p = a; p; p = p->next)
+    if (!ilist_member(b, p->i))
+      return FALSE;
+  return TRUE;
 }  /* ilist_subset */
 
 /*************
@@ -1271,14 +1264,15 @@ void p_ilist(Ilist p)
 /* PUBLIC */
 Ilist ilist_copy(Ilist p)
 {
-  if (p == NULL)
-    return NULL;
-  else {
+  Ilist head = NULL, tail = NULL, q;
+  for (q = p; q; q = q->next) {
     Ilist new = get_ilist();
-    new->i = p->i;
-    new->next = ilist_copy(p->next);
-    return new;
+    new->i = q->i;
+    new->next = NULL;
+    if (tail) tail->next = new; else head = new;
+    tail = new;
   }
+  return head;
 }  /* ilist_copy */
 
 /*************
@@ -1293,16 +1287,18 @@ Ilist ilist_copy(Ilist p)
 /* PUBLIC */
 Ilist ilist_remove_last(Ilist p)
 {
+  Ilist q, prev;
   if (p == NULL)
     return NULL;
-  else if (p->next == NULL) {
-    free_ilist(p);
+  for (q = p, prev = NULL; q->next; prev = q, q = q->next)
+    ;
+  if (prev == NULL) {
+    free_ilist(q);
     return NULL;
   }
-  else {
-    p->next = ilist_remove_last(p->next);
-    return p;
-  }
+  prev->next = NULL;
+  free_ilist(q);
+  return p;
 }  /* ilist_remove_last */
 
 /*************
@@ -1318,10 +1314,12 @@ How many times does an integer occur in an ilist?
 /* PUBLIC */
 int ilist_occurrences(Ilist p, int i)
 {
-  if (p == NULL)
-    return 0;
-  else
-    return ilist_occurrences(p->next, i) + (p->i == i ? 1 : 0);
+  Ilist q;
+  int n = 0;
+  for (q = p; q; q = q->next)
+    if (q->i == i)
+      n++;
+  return n;
 }  /* ilist_occurrences */
 
 /*************
@@ -1336,16 +1334,16 @@ int ilist_occurrences(Ilist p, int i)
 /* PUBLIC */
 Ilist ilist_insert_up(Ilist p, int i)
 {
-  if (p == NULL || p->i >= i) {
-    Ilist g = get_ilist();
-    g->i = i;
-    g->next = p;
+  Ilist g, q, prev;
+  for (q = p, prev = NULL; q && q->i < i; prev = q, q = q->next)
+    ;
+  g = get_ilist();
+  g->i = i;
+  g->next = q;
+  if (prev == NULL)
     return g;
-  }
-  else {
-    p->next = ilist_insert_up(p->next, i);
-    return p;
-  }
+  prev->next = g;
+  return p;
 }  /* ilist_insert_up */
 
 /*************
@@ -1361,17 +1359,12 @@ Count from 1; return -1 if the int is not in the Ilist.
 /* PUBLIC */
 int position_in_ilist(int i, Ilist p)
 {
-  if (p == NULL)
-    return -1;
-  else if (p->i == i)
-    return 1;
-  else {
-    int pos = position_in_ilist(i, p->next);
-    if (pos == -1)
-      return -1;
-    else
-      return pos+1;
-  }
+  Ilist q;
+  int pos = 1;
+  for (q = p; q; q = q->next, pos++)
+    if (q->i == i)
+      return pos;
+  return -1;
 }  /* position_in_ilist */
 
 /*****************************************************************************/
@@ -1415,17 +1408,17 @@ is returned.
 /* PUBLIC */
 I2list i2list_append(I2list lst, int i, int j)
 {
-  if (lst == NULL) {
-    I2list g = get_i2list();
-    g->i = i;
-    g->j = j;
-    g->next = NULL;
+  I2list g = get_i2list();
+  I2list p;
+  g->i = i;
+  g->j = j;
+  g->next = NULL;
+  if (lst == NULL)
     return g;
-  }
-  else {
-    lst->next = i2list_append(lst->next, i, j);
-    return lst;
-  }
+  for (p = lst; p->next; p = p->next)
+    ;
+  p->next = g;
+  return lst;
 }  /* i2list_append */
 
 /*************
@@ -1464,17 +1457,17 @@ The argument is "used up".
 /* PUBLIC */
 I2list i2list_removeall(I2list p, int i)
 {
-  if (p == NULL)
-    return NULL;
-  else if (p->i == i) {
-    I2list r = p->next;
-    free_i2list(p);
-    return i2list_removeall(r, i);
+  I2list q, prev, next;
+  for (q = p, prev = NULL; q; q = next) {
+    next = q->next;
+    if (q->i == i) {
+      if (prev) prev->next = next; else p = next;
+      free_i2list(q);
+    }
+    else
+      prev = q;
   }
-  else {
-    p->next = i2list_removeall(p->next, i);
-    return p;
-  }
+  return p;
 }  /* i2list_removeall */
 
 /*************
@@ -1489,12 +1482,11 @@ I2list i2list_removeall(I2list p, int i)
 /* PUBLIC */
 I2list i2list_member(I2list lst, int i)
 {
-  if (lst == NULL)
-    return NULL;
-  else if (lst->i == i)
-    return lst;
-  else
-    return i2list_member(lst->next, i);
+  I2list p;
+  for (p = lst; p; p = p->next)
+    if (p->i == i)
+      return p;
+  return NULL;
 }  /* i2list_member */
 
 /*************
@@ -1555,12 +1547,11 @@ This function checks if a triple of integers is a member of a I3list.
 /* PUBLIC */
 BOOL i3list_member(I3list lst, int i, int j, int k)
 {
-  if (lst == NULL)
-    return FALSE;
-  else if (lst->i == i && lst->j == j && lst->k == k)
-    return TRUE;
-  else
-    return i3list_member(lst->next, i, j, k);
+  I3list p;
+  for (p = lst; p; p = p->next)
+    if (p->i == i && p->j == j && p->k == k)
+      return TRUE;
+  return FALSE;
 }  /* i3list_member */
 
 /*************
@@ -1577,18 +1568,18 @@ is returned.
 /* PUBLIC */
 I3list i3list_append(I3list lst, int i, int j, int k)
 {
-  if (lst == NULL) {
-    I3list g = get_i3list();
-    g->i = i;
-    g->j = j;
-    g->k = k;
-    g->next = NULL;
+  I3list g = get_i3list();
+  I3list p;
+  g->i = i;
+  g->j = j;
+  g->k = k;
+  g->next = NULL;
+  if (lst == NULL)
     return g;
-  }
-  else {
-    lst->next = i3list_append(lst->next, i, j, k);
-    return lst;
-  }
+  for (p = lst; p->next; p = p->next)
+    ;
+  p->next = g;
+  return lst;
 }  /* i3list_append */
 
 /*************
@@ -1645,15 +1636,13 @@ void zap_i3list(I3list p)
 static
 I3list rev_app_i3list(I3list p1, I3list p2)
 {
-  I3list p3;
-
-  if (p1 == NULL)
-    return(p2);
-  else {
-    p3 = p1->next;
+  while (p1 != NULL) {
+    I3list p3 = p1->next;
     p1->next = p2;
-    return(rev_app_i3list(p3, p1));
+    p2 = p1;
+    p1 = p3;
   }
+  return p2;
 }  /* rev_app_i3list */
 
 /*************
@@ -1765,12 +1754,11 @@ See alist_insert.
 /* PUBLIC */
 int assoc(I2list p, int key)
 {
-  if (p == NULL)
-    return INT_MIN;
-  else if (p->i == key)
-    return p->j;
-  else
-    return assoc(p->next, key);
+  I2list q;
+  for (q = p; q; q = q->next)
+    if (q->i == key)
+      return q->j;
+  return INT_MIN;
 }  /* assoc */
 
 /*************
@@ -1808,13 +1796,11 @@ See alist2_insert.
 /* PUBLIC */
 int assoc2a(I3list p, int key)
 {
-  /* assume number of members is multiple of 3 */
-  if (p == NULL)
-    return INT_MIN;
-  else if (p->i == key)
-    return p->j;
-  else
-    return assoc2a(p->next, key);
+  I3list q;
+  for (q = p; q; q = q->next)
+    if (q->i == key)
+      return q->j;
+  return INT_MIN;
 }  /* assoc2a */
 
 /*************
@@ -1830,13 +1816,11 @@ See alist2_insert.
 /* PUBLIC */
 int assoc2b(I3list p, int key)
 {
-  /* assume number of members is multiple of 3 */
-  if (p == NULL)
-    return INT_MIN;
-  else if (p->i == key)
-    return p->k;
-  else
-    return assoc2b(p->next, key);
+  I3list q;
+  for (q = p; q; q = q->next)
+    if (q->i == key)
+      return q->k;
+  return INT_MIN;
 }  /* assoc2a */
 
 /*************
@@ -1851,19 +1835,19 @@ int assoc2b(I3list p, int key)
 /* PUBLIC */
 I3list alist2_remove(I3list p, int key)
 {
-  /* assume number of members is multiple of 3 */
-
-  if (p == NULL)
-    return NULL;
-  else {
-    p->next= alist2_remove(p->next, key);
-    if (p->i == key) {
-      I3list a = p;
-      p = p->next;
-      free_i3list(a);
+  /* The recursive version fixed up the tail before testing the head, but the
+     result is the same list with every key-matching cell gone, in order. */
+  I3list q, prev, next;
+  for (q = p, prev = NULL; q; q = next) {
+    next = q->next;
+    if (q->i == key) {
+      if (prev) prev->next = next; else p = next;
+      free_i3list(q);
     }
-    return p;
+    else
+      prev = q;
   }
+  return p;
 }  /* alist2_remove */
 
 /*****************************************************************************/
@@ -1888,12 +1872,11 @@ Is <i,n> a multimember of multiset b?
 /* PUBLIC */
 BOOL i2list_multimember(I2list b, int i, int n)
 {
-  if (b == NULL)
-    return FALSE;
-  else if (i == b->i)
-    return n <= b->j;
-  else
-    return i2list_multimember(b->next, i, n);
+  I2list p;
+  for (p = b; p; p = p->next)
+    if (i == p->i)
+      return n <= p->j;
+  return FALSE;
 }  /* i2list_multimember */
 
 /*************
@@ -1908,12 +1891,11 @@ BOOL i2list_multimember(I2list b, int i, int n)
 /* PUBLIC */
 BOOL i2list_multisubset(I2list a, I2list b)
 {
-  if (a == NULL)
-    return TRUE;
-  else if (!i2list_multimember(b, a->i, a->j))
-    return FALSE;
-  else
-    return i2list_multisubset(a->next, b);
+  I2list p;
+  for (p = a; p; p = p->next)
+    if (!i2list_multimember(b, p->i, p->j))
+      return FALSE;
+  return TRUE;
 }  /* i2list_multisubset */
 
 /*************
