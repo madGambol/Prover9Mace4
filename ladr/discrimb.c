@@ -135,7 +135,7 @@ void p_discrimb_mem(void)
 void check_discrim_bind_tree(Discrim d, int n)
 {
   if (n > 0) {
-    int arity;
+    ArityType arity;
     Discrim d1;
     for (d1 = d->u.kids; d1; d1 = d1->next) {
       if (DVAR(d1))
@@ -156,7 +156,7 @@ void check_discrim_bind_tree(Discrim d, int n)
 static
 void print_discrim_bind_tree(FILE *fp, Discrim d, int n, int depth)
 {
-  int arity, i;
+  ArityType arity, i;
 
   for (i = 0; i < depth; i++)
     printf(" -");

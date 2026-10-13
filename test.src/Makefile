@@ -11,7 +11,7 @@ CFLAGS = $(XFLAGS) -g  -O0 -Wall
 # CFLAGS = $(XFLAGS) -pg -O -Wall
 # CFLAGS = $(XFLAGS)  -Wall -pedantic
 
-PROGRAMS = avltest strbuf_test memory_test
+PROGRAMS = avltest strbuf_test memory_test arity_test
 
 all: ladr apps
 
@@ -36,6 +36,10 @@ avltest: avltest.o
 strbuf_test: strbuf_test.o
 	$(CC) $(CFLAGS) -o strbuf_test strbuf_test.o ../ladr/libladr.a -lm
 
+# Checks the arity ceiling and that widening it cost no memory; milliseconds.
+arity_test: arity_test.o
+	$(CC) $(CFLAGS) -o arity_test arity_test.o ../ladr/libladr.a -lm
+
 # Checks that the palloc() byte counter is wide enough; needs ~2.2GB.
 memory_test: memory_test.o
 	$(CC) $(CFLAGS) -o memory_test memory_test.o ../ladr/libladr.a -lm
@@ -46,7 +50,8 @@ memory_test: memory_test.o
 #   mace4_soundness.sh - every model Mace4 reports really does satisfy the
 #                        input clauses (checked independently by clausetester)
 # Each accepts a bin directory, e.g.  ./regress.sh /path/to/other/bin
-check: strbuf_test memory_test
+check: strbuf_test memory_test arity_test
+	./arity_test
 	./strbuf_test
 	./memory_test
 	./regress.sh
@@ -71,7 +76,8 @@ check: strbuf_test memory_test
 # regression test, and that is the single mistake this suite has made most
 # often, so it is worth asserting rather than remembering.
 
-tier1:
+tier1: arity_test
+	./arity_test
 	./demos/run.sh
 	./tptp_semantics.sh
 

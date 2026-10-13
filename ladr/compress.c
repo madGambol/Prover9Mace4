@@ -36,7 +36,7 @@ Term uncompress_term(char *s, int *ip)
   if (c <= 0)
     return get_variable_term(-c);
   else {
-    int arity = sn_to_arity(c);
+    ArityType arity = sn_to_arity(c);
     Term t = get_rigid_term_dangerously(c, arity);
     int i;
     for (i = 0; i < ARITY(t); i++)

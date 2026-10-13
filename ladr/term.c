@@ -83,7 +83,21 @@ Term get_term(int arity)
      private_symbol is not initialized.
      args array is not initialized.
    */
-  Term p = get_mem(PTRS_TERM + arity);  /* non-initialized memory */
+  Term p;
+
+  /* Checked here, at the one place a term is allocated, rather than only in
+     get_rigid_term().  The arity field is narrower than this int parameter,
+     so without a check an over-large arity is silently truncated and the term
+     then disagrees with its own args array -- a wrong answer rather than an
+     error.  get_rigid_term() still checks too, because it can name the
+     offending symbol in the message. */
+
+  if (arity < 0 || arity > MAX_ARITY) {
+    printf("\nArity %d requested, maximum is %d\n", arity, MAX_ARITY);
+    fatal_error("get_term, arity out of range");
+  }
+
+  p = get_mem(PTRS_TERM + arity);  /* non-initialized memory */
   p->arity = arity;
   if (arity == 0)
     p->args = NULL;
@@ -271,7 +285,7 @@ use sn_to_str() and get_rigid_term() instead.
 */
 
 /* PUBLIC */
-Term get_rigid_term_dangerously(int symnum, int arity)
+Term get_rigid_term_dangerously(int symnum, ArityType arity)
 {
   Term t1 = get_term(arity);
   t1->private_symbol = -symnum;
@@ -1096,7 +1110,7 @@ Does term t have the the given symbol and arity?
 */
 
 /* PUBLIC */
-BOOL is_term(Term t, char *str, int arity)
+BOOL is_term(Term t, char *str, ArityType arity)
 {
   return t != NULL && is_symbol(SYMNUM(t), str, arity);
 }  /* is_term */

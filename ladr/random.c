@@ -288,7 +288,7 @@ Term random_op_term(int depth)
     return get_rigid_term("b", 0);
   else {
     Term t;
-    int arity, i, sn;
+    ArityType arity, i, sn;
     
     sn = symnum[rand() % 13];
     arity = sn_to_arity(sn);

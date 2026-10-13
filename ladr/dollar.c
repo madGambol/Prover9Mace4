@@ -55,7 +55,7 @@ static int Local_evals;
 
 static struct {
   char *name;
-  int   arity;
+  ArityType   arity;
   int   op_code;
 } Dollar_ops[] = {
   {"+",        2, SUM_OP},    {"*",   2, PROD_OP},  {"/",   2, DIV_OP},

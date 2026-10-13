@@ -70,7 +70,7 @@ static
 void negprop_elim(int id, Term beta, Mstate state)
 {
   struct cell *c = Cells + id;
-  int arity      = c->symbol->arity;
+  ArityType arity      = c->symbol->arity;
   int sym        = c->symbol->mace_sn;
   Term alpha     = c->eterm;
   int i;
@@ -117,7 +117,7 @@ static
 void negprop_assign(int id, Mstate state)
 {
   struct cell *c = Cells + id;
-  int arity      = c->symbol->arity;
+  ArityType arity      = c->symbol->arity;
   int sym        = c->symbol->mace_sn;
   Term alpha     = c->eterm;
   Term beta      = c->value;

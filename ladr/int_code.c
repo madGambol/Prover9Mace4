@@ -128,8 +128,8 @@ Term get_term_from_ibuf(Ibuffer ibuf)
   else {
     Term t;
     int i;
-    int arity = sn_to_arity(a);
-    if (arity == -1) {
+    ArityType arity = sn_to_arity(a);
+    if (arity == ARITY_NONE) {
       printf("bad symnum: %d\n", a);
       fatal_error("get_term_from_ibuf, symbol not in symbol table");
     }

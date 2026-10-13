@@ -74,7 +74,19 @@ int symbol_count(Term t)
 
 #define MAX_VAR   INT_MAX     /* max var ID that fits in sym field of term */
 #define MAX_SYM   INT_MAX     /* max ID of any rigid symbol */
-#define MAX_ARITY UCHAR_MAX   /* max arity of any term (don't make this big) */
+/* MAX_ARITY, ARITY_NONE and the ArityType type are in header.h, next to the
+   other basic definitions, because symbols.h needs them too.
+
+   The ceiling was UCHAR_MAX, 255, with the comment "don't make this big".
+   255 is too small for real input: TPTP v9.3.1 has problems whose
+   clausification produces Skolem functions of arity up to 280 (esk1426_280,
+   in the KRS and SYO families), and those could not be read at all.
+
+   The caution in that comment is still worth keeping, but it is about the
+   args array rather than the constant.  get_term() allocates the argument
+   pointers contiguously with the term, so a term of arity n costs
+   (PTRS_TERM + n) pointers; a 65534-ary term is half a megabyte.  That is a
+   reason not to use enormous arities, not a reason the ceiling must be 255. */
 
 #define FLAGS_TYPE unsigned char  /* for private_flags field of Term */
 
@@ -82,7 +94,7 @@ typedef struct term * Term;     /* Term is a pointer to a term struct */
 
 struct term {
   int            private_symbol; /* const/func/pred/var symbol ID */
-  unsigned char  arity;          /* number of auguments */
+  ArityType          arity;          /* number of arguments */
   FLAGS_TYPE     private_flags;  /* for marking terms in various ways */
   Term           *args;          /* array (size arity) of pointers to args */
   void           *container;     /* containing object */
@@ -128,7 +140,7 @@ Term get_rigid_term_like(Term t);
 
 Term get_rigid_term(char *sym, int arity);
 
-Term get_rigid_term_dangerously(int symnum, int arity);
+Term get_rigid_term_dangerously(int symnum, ArityType arity);
 
 void zap_term(Term t);
 
@@ -192,7 +204,7 @@ int natural_constant_term(Term t);
 
 int arg_position(Term parent, Term child);
 
-BOOL is_term(Term t, char *str, int arity);
+BOOL is_term(Term t, char *str, ArityType arity);
 
 BOOL is_constant(Term t, char *str);
 
