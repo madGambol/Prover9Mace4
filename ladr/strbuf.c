@@ -22,71 +22,119 @@
  * private definitions and types
  */
 
+/* A String_buf is a flat, contiguous, growable array of characters.
+ *
+ * It used to be a singly-linked list of 100-byte chunks, which made every
+ * indexed access walk the list from the head:
+ *
+ *     char sb_char(String_buf sb, int n) {
+ *       Chunk h = sb->first;
+ *       for (i = 0; i < n / CHUNK_SIZE; i++)    <-- n/100 pointer hops
+ *         h = h->next;
+ *       return h->s[n % CHUNK_SIZE];
+ *     }
+ *
+ * Four places index a String_buf in a loop, so each was quadratic in the
+ * buffer's length: the tokeniser in parse.c (about twenty sb_char call sites,
+ * read sequentially), sb_remove_some_space() in the same file (which also
+ * calls sb_replace_char, an identical walk), and both sb_to_malloc_string()
+ * and sb_to_malloc_char_array().  Reading N characters cost about N^2/200
+ * pointer hops -- for a megabyte of input, five thousand million.
+ *
+ * A cursor cacheing the last chunk reached would not have been enough.
+ * parse.c's sb_remove_some_space() scans forward but reads a +/-2 window
+ * around i, and the chunks were singly linked, so stepping back across a
+ * chunk boundary had to restart from the head.  That happens once per hundred
+ * characters, which leaves the cost quadratic, merely ten thousand times
+ * smaller.  Doubly linking the chunks would have fixed it for eight bytes per
+ * hundred-byte chunk, but there is no longer any reason to have chunks at
+ * all: they exist because the original avoided realloc.
+ *
+ * So indexing is now sb->s[n], and the capacity doubles on growth, which
+ * keeps appending amortised O(1) per character -- the property the "last"
+ * pointer was added to recover.
+ *
+ * The characters are allocated through LADR's own allocator rather than
+ * malloc, deliberately.  Chunks came from get_cmem(), so String_buf memory
+ * counted towards max_megs; keeping it there means neither that accounting
+ * nor the memory report quietly changes meaning.
+ */
+
 struct string_buf {
-  struct chunk *first;
-  struct chunk *last;   /* so that appending does not rescan the chunk list */
-  int size;
+  char *s;         /* the characters, contiguous; NULL when capacity is 0 */
+  int size;        /* how many are in use */
+  int capacity;    /* how many are allocated; always a whole number of
+		      pointers, because that is what get_mem deals in */
 };
 
-#define CHUNK_SIZE 100
-
-struct chunk {
-  char s[CHUNK_SIZE];
-  struct chunk *next;
-};
-
-typedef struct chunk *Chunk;
+#define SB_INITIAL_CAPACITY 64
 
 /*
  * memory management
  */
 
-#define PTRS_CHUNK PTRS(sizeof(struct chunk))
-static unsigned Chunk_gets, Chunk_frees;
-
 #define PTRS_STRING_BUF PTRS(sizeof(struct string_buf))
 static unsigned String_buf_gets, String_buf_frees;
+static unsigned Buffer_gets, Buffer_frees;
+static unsigned Buffer_bytes;    /* currently allocated for characters */
 
 /*************
  *
- *   Chunk get_chunk()
+ *   sb_ensure_capacity()
  *
  *************/
 
+/* Make room for at least <needed> characters, doubling so that a run of
+   appends costs amortised O(1) each.  get_mem/free_mem deal in pointers, so
+   the capacity is rounded up to a whole number of them, and the rounded
+   figure is what gets remembered -- free_mem must be given the same count
+   that get_mem was. */
+
 static
-Chunk get_chunk(void)
+void sb_ensure_capacity(String_buf sb, int needed)
 {
-  Chunk p = get_cmem(PTRS_CHUNK);
-  Chunk_gets++;
-  return(p);
-}  /* get_chunk */
+  if (needed <= sb->capacity)
+    return;
+  else {
+    int new_capacity = (sb->capacity == 0 ? SB_INITIAL_CAPACITY : sb->capacity);
+    char *new_s;
+
+    while (new_capacity < needed) {
+      if (new_capacity > INT_MAX / 2)
+	fatal_error("sb_ensure_capacity, String_buf too big");
+      new_capacity *= 2;
+    }
+    new_capacity = PTRS(new_capacity) * BYTES_POINTER;
+
+    new_s = (char *) get_mem(PTRS(new_capacity));
+    Buffer_gets++;
+    Buffer_bytes += new_capacity;
+
+    if (sb->s != NULL) {
+      memcpy(new_s, sb->s, sb->size);
+      free_mem(sb->s, PTRS(sb->capacity));
+      Buffer_frees++;
+      Buffer_bytes -= sb->capacity;
+    }
+    sb->s = new_s;
+    sb->capacity = new_capacity;
+  }
+}  /* sb_ensure_capacity */
 
 /*************
  *
- *    free_chunk()
- *
- *************/
-
-static
-void free_chunk(Chunk p)
-{
-  free_mem(p, PTRS_CHUNK);
-  Chunk_frees++;
-}  /* free_chunk */
-
-/*************
- *
- *   String_buf get_string_buf()
+ *    String_buf get_string_buf()
  *
  *************/
 
 /* DOCUMENTATION
+This routine allocates and returns an empty String_buf.
 */
 
 /* PUBLIC */
 String_buf get_string_buf(void)
 {
-  String_buf p = get_cmem(PTRS_STRING_BUF);
+  String_buf p = get_cmem(PTRS_STRING_BUF);   /* zeroed: s=NULL, size=0 */
   String_buf_gets++;
   return(p);
 }  /* get_string_buf */
@@ -123,11 +171,14 @@ void fprint_strbuf_mem(FILE *fp, BOOL heading)
   if (heading)
     fprintf(fp, "  type (bytes each)        gets      frees     in use      bytes\n");
 
-  n = sizeof(struct chunk);
-  fprintf(fp, "chunk (%4d)        %11u%11u%11u%9.1f K\n",
-          n, Chunk_gets, Chunk_frees,
-          Chunk_gets - Chunk_frees,
-          ((Chunk_gets - Chunk_frees) * n) / 1024.);
+  /* This line used to count 100-byte chunks.  There are no chunks now, so it
+     reports the character buffers instead: how many have been allocated and
+     released, and how many bytes they currently hold. */
+
+  fprintf(fp, "sb buffer (  var)   %11u%11u%11u%9.1f K\n",
+	  Buffer_gets, Buffer_frees,
+	  Buffer_gets - Buffer_frees,
+	  Buffer_bytes / 1024.);
 
   n = sizeof(struct string_buf);
   fprintf(fp, "string_buf (%4d)   %11u%11u%11u%9.1f K\n",
@@ -157,6 +208,7 @@ void p_strbuf_mem()
 /*
  *  end of memory management
  */
+
 /*************
  *
  *    String_buf init_string_buf()
@@ -191,17 +243,10 @@ This routine prints String_buf sb to FILE *fp.
 /* PUBLIC */
 void fprint_sb(FILE *fp, String_buf sb)
 {
-  Chunk h = sb->first;
-  int i = 0;
-
-  while (i < sb->size) {
-    char c = h->s[i % CHUNK_SIZE];
-    if (c != '\0')
-      putc(c, fp);
-    i++;
-    if (i % CHUNK_SIZE == 0)
-      h = h->next;
-  }
+  int i;
+  for (i = 0; i < sb->size; i++)
+    if (sb->s[i] != '\0')      /* NUL characters are skipped, as before */
+      putc(sb->s[i], fp);
 }  /* fprint_sb */
 
 /*************
@@ -238,24 +283,12 @@ the String_buf.
 /* PUBLIC */
 void sb_append(String_buf sb, char *s)
 {
-  int i;
-  int n = sb->size;
-  Chunk last = sb->last;
-
-  for (i = 0; s[i] != '\0'; i++) {
-    if (n % CHUNK_SIZE == 0) {
-      Chunk new = get_chunk();
-      if (last != NULL)
-	last->next = new;
-      else
-	sb->first = new;
-      last = new;
-    }
-    last->s[n % CHUNK_SIZE] = s[i];
-    n++;
+  int n = (int) strlen(s);
+  if (n > 0) {
+    sb_ensure_capacity(sb, sb->size + n);
+    memcpy(sb->s + sb->size, s, n);
+    sb->size += n;
   }
-  sb->size = n;
-  sb->last = last;
 }  /* sb_append */
 
 /*************
@@ -271,27 +304,14 @@ This routine appends character c to String_buf sb.
 /* PUBLIC */
 void sb_append_char(String_buf sb, char c)
 {
-  /* In the first version of this routine, we simply built a string "c",
-     and then called sb_append.  This causes a problem, however, if
-     we use this package for sequences of small integers.  In particular,
-     if we want to append the char 0, that won't work.
-  */
+  /* Note that c may be '\0'.  The first version of this routine built a
+     one-character string and called sb_append, which cannot append a NUL,
+     and that matters because this package is also used for sequences of
+     small integers. */
 
-  int n = sb->size;
-  Chunk last = sb->last;
-
-  if (n % CHUNK_SIZE == 0) {
-    Chunk new = get_chunk();
-    if (last != NULL)
-      last->next = new;
-    else
-      sb->first = new;
-    last = new;
-  }
-  last->s[n % CHUNK_SIZE] = c;
-  n++;
-  sb->size = n;
-  sb->last = last;
+  sb_ensure_capacity(sb, sb->size + 1);
+  sb->s[sb->size] = c;
+  sb->size++;
 }  /* sb_append_char */
 
 /*************
@@ -310,13 +330,8 @@ void sb_replace_char(String_buf sb, int i, char c)
 {
   if (i < 0 || i >= sb->size)
     return;
-  else {
-    Chunk h = sb->first;
-    int j;
-    for (j = 0; j < i / CHUNK_SIZE; j++)
-      h = h->next;
-    h->s[i % CHUNK_SIZE] = c;
-  }
+  else
+    sb->s[i] = c;
 }  /* sb_replace_char */
 
 /*************
@@ -335,13 +350,8 @@ char sb_char(String_buf sb, int n)
 {
   if (n < 0 || n >= sb->size)
     return '\0';
-  else {
-    Chunk h = sb->first;
-    int i;
-    for (i = 0; i < n / CHUNK_SIZE; i++)
-      h = h->next;
-    return h->s[n % CHUNK_SIZE];
-  }
+  else
+    return sb->s[n];
 }  /* sb_char */
 
 /*************
@@ -351,7 +361,7 @@ char sb_char(String_buf sb, int n)
  *************/
 
 /* DOCUMENTATION
-This routine appends a copy of sb2 to sb1.
+This routine appends a copy of String_buf sb2 to the end of String_buf sb1.
 String_buf sb2 is not changed.
 You can use sb_cat() instead if you won't be needing sb2.
 */
@@ -359,21 +369,15 @@ You can use sb_cat() instead if you won't be needing sb2.
 /* PUBLIC */
 void sb_cat_copy(String_buf sb1, String_buf sb2)
 {
-  /* Walk sb2's chunks directly.  The previous version indexed sb2 with
-     sb_char(sb2,i), which rescans the chunk list on every character, so
-     concatenating was quadratic in the size of sb2.  As before, copying
-     stops at the end of sb2 or at the first NUL character in it,
-     whichever comes first. */
-  Chunk h;
-  int i = 0;
-
-  for (h = sb2->first; h != NULL && i < sb2->size; h = h->next) {
-    int j;
-    for (j = 0; j < CHUNK_SIZE && i < sb2->size; j++, i++) {
-      if (h->s[j] == '\0')
-	return;
-      sb_append_char(sb1, h->s[j]);
-    }
+  /* Copying stops at the end of sb2 or at the first NUL character in it,
+     whichever comes first -- the same rule as before. */
+  int n = 0;
+  while (n < sb2->size && sb2->s[n] != '\0')
+    n++;
+  if (n > 0) {
+    sb_ensure_capacity(sb1, sb1->size + n);
+    memcpy(sb1->s + sb1->size, sb2->s, n);
+    sb1->size += n;
   }
 }  /* sb_cat_copy */
 
@@ -410,12 +414,10 @@ associated with it.
 /* PUBLIC */
 void zap_string_buf(String_buf sb)
 {
-  Chunk curr, prev;
-  curr = sb->first;
-  while (curr != NULL) {
-    prev = curr;
-    curr = curr->next;
-    free_chunk(prev);
+  if (sb->s != NULL) {
+    free_mem(sb->s, PTRS(sb->capacity));
+    Buffer_frees++;
+    Buffer_bytes -= sb->capacity;
   }
   free_string_buf(sb);
 }  /* zap_string_buf */
@@ -450,12 +452,10 @@ char *sb_to_malloc_string(String_buf sb)
     return NULL;
   else {
     int j = 0;  /* index for new string */
-    int i;      /* index for Str_buf */
-    for (i = 0; i < sb->size; i++) {
-      char c = sb_char(sb, i);
-      if (c != '\0')
-	s[j++] = c;
-    }
+    int i;      /* index for String_buf */
+    for (i = 0; i < sb->size; i++)
+      if (sb->s[i] != '\0')
+	s[j++] = sb->s[i];
     s[j] = '\0';
     return s;
   }
@@ -469,7 +469,7 @@ char *sb_to_malloc_string(String_buf sb)
 
 /* DOCUMENTATION
 This routine is similar to sb_to_malloc_string(), except that
-null characters are copied to the new string. 
+null characters are copied to the new string.
 */
 
 /* PUBLIC */
@@ -480,10 +480,9 @@ char *sb_to_malloc_char_array(String_buf sb)
   if (s == NULL)
     return NULL;
   else {
-    int i;
-    for (i = 0; i < sb->size; i++)
-      s[i] = sb_char(sb, i);
-    s[i] = '\0';
+    if (sb->size > 0)
+      memcpy(s, sb->s, sb->size);
+    s[sb->size] = '\0';
     return s;
   }
 }  /* sb_to_malloc_char_array */
@@ -519,4 +518,3 @@ void sb_append_int(String_buf sb, int i)
   char s[25];
   sb_append(sb, int_to_str(i, s, 25));
 }  /* sb_append_int */
-
