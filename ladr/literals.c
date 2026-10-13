@@ -156,7 +156,7 @@ a literal.  The atom is not copied.
 */
 
 /* PUBLIC */
-Literals new_literal(int sign, Term atom)
+Literals new_literal(BOOL sign, Term atom)
 {
   Literals lit = get_literals();
   lit->sign = sign;

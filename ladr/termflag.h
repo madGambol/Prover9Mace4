@@ -26,7 +26,13 @@
 
 /* Public definitions */
 
-#define TP_BIT(bits, flag)     (bits & flag)
+/* Is <flag> set in <bits>?  The mask is not 1, so "bits & flag" is a bit
+   pattern rather than a truth value -- for the flag at bit 3 it is 8, not 1.
+   Callers assign it to a BOOL, and a BOOL is expected to hold only TRUE or
+   FALSE; nothing compares it against TRUE today, but a BOOL holding 8 is a
+   trap waiting for the first caller that does. */
+
+#define TP_BIT(bits, flag)     (((bits) & (flag)) ? TRUE : FALSE)
 
 /* End of public definitions */
 

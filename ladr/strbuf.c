@@ -202,7 +202,7 @@ associated with the strbuf package.
 /* PUBLIC */
 void p_strbuf_mem()
 {
-  fprint_strbuf_mem(stdout, 1);
+  fprint_strbuf_mem(stdout, TRUE);
 }  /* p_strbuf_mem */
 
 /*

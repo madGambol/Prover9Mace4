@@ -206,7 +206,7 @@ This routine prints memory usage statistics for Terms to stdout.
 /* PUBLIC */
 void p_term_mem(void)
 {
-  fprint_term_mem(stdout, 1);
+  fprint_term_mem(stdout, TRUE);
 }  /* p__mem */
 
 /*
@@ -361,13 +361,13 @@ bits or u are NOT checked.
 BOOL term_ident(Term t1, Term t2)
 {
   if (t1->private_symbol != t2->private_symbol)
-    return 0;
+    return FALSE;
   else {
     int i;
     for (i = 0; i < ARITY(t1); i++)
       if (!term_ident(ARG(t1,i), ARG(t2,i)))
-	return 0;
-    return 1;
+	return FALSE;
+    return TRUE;
   }
 }  /* term_ident */  
 

@@ -705,7 +705,14 @@ Formula formula_copy(Formula f)
 */
 
 /* PUBLIC */
-BOOL dual_type(int op)
+/* Returns the dual of a formula type: AND<->OR, ALL<->EXISTS, and anything
+   else unchanged.  This was declared to return BOOL, which is simply the
+   wrong type -- the values are Ftype enumerators running up to EXISTS_FORM
+   (8), and all three callers assign the result straight into a Formula's
+   "type" field.  It happened to work because BOOL is int-width and the values
+   are small, but it defeated any checking and misled the reader. */
+
+Ftype dual_type(Ftype op)
 {
   switch (op) {
   case AND_FORM: return OR_FORM;

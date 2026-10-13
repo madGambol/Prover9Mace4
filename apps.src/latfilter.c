@@ -122,7 +122,7 @@ BOOL lattice_leq(Term s, Term t)
  *
  *************/
 
-int lattice_identity(Term atom)
+BOOL lattice_identity(Term atom)
 {
   return (atom != NULL &&
 	  is_symbol(SYMNUM(atom), "=", 2) &&

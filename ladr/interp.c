@@ -1178,9 +1178,9 @@ BOOL eval_literals_ground(Literals lits, Interp p, int *vals)
       atom_val = (eval_term_ground(ARG(lit->atom,0), p, vals) ==
 		  eval_term_ground(ARG(lit->atom,1), p, vals));
     else
-      atom_val = eval_term_ground(lit->atom, p, vals);
+      atom_val = eval_term_ground(lit->atom, p, vals) != 0 ? TRUE : FALSE;
 
-    true_literal = (lit->sign ? atom_val : !atom_val);
+    true_literal = (lit->sign ? atom_val : !atom_val) ? TRUE : FALSE;
   }
   return true_literal;
 }  /* eval_literals_ground */
@@ -1394,7 +1394,7 @@ BOOL eval_form(Formula f, Interp p, int vals[])
       return (eval_fterm_ground(ARG(f->atom,0), p, vals) ==
 	      eval_fterm_ground(ARG(f->atom,1), p, vals));
     else
-      return eval_fterm_ground(f->atom, p, vals);
+      return eval_fterm_ground(f->atom, p, vals) != 0 ? TRUE : FALSE;
   }
   else if (f->type == ALL_FORM) {
     /* ok if true for every element of domain */
@@ -1454,7 +1454,7 @@ BOOL eval_form(Formula f, Interp p, int vals[])
   }
   else {
     fatal_error("eval_form, bad formula.");
-    return 0;  /* to please the compiler */
+    return FALSE;  /* to please the compiler */
   }
 }  /* eval_form */
 

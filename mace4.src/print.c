@@ -414,14 +414,14 @@ void p_mem(void)
 
   printf("\nTotal malloced: %d megabytes\n", megs_malloced());
 
-  fprint_strbuf_mem(stdout, 1);
-  fprint_parse_mem(stdout, 0);
-  fprint_glist_mem(stdout, 0);
-  fprint_term_mem(stdout, 0);
+  fprint_strbuf_mem(stdout, TRUE);
+  fprint_parse_mem(stdout, FALSE);
+  fprint_glist_mem(stdout, FALSE);
+  fprint_term_mem(stdout, FALSE);
   fprint_topform_mem(stdout, 0);
-  fprint_clist_mem(stdout, 0);
+  fprint_clist_mem(stdout, FALSE);
   fprint_mclause_mem(stdout, 0);
-  fprint_mstate_mem(stdout, 0);
+  fprint_mstate_mem(stdout, FALSE);
   fprint_estack_mem(stdout, 0);
   memory_report(stdout);
 }  /* p_mem */
