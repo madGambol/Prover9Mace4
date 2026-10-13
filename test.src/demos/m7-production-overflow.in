@@ -1,0 +1,69 @@
+%------------------------------------------------------------------------------
+% M7 -- a heap buffer overflow on every production-mode run.
+%
+% This file is LADR (prover9) input, not TPTP, because the defect is in the
+% prover rather than the translator.  It is six lines long and it overflows
+% the heap on the 2009 code.
+%
+% THE DEFECT
+%   ladr/dollar.c sized an array from the symbol count and then filled it
+%   using calls that ADD to that count:
+%
+%       Symbols_size = greatest_symnum() + 1;          /* a snapshot */
+%       Op_codes = calloc(Symbols_size, sizeof(int));
+%       Op_codes[str_to_sn("+", 2)]   = SUM_OP;
+%       Op_codes[str_to_sn("mod", 2)] = MOD_OP;        /* ... 26 of these */
+%
+%   greatest_symnum() returns the current symbol count, while str_to_sn()
+%   INTERNS a symbol that is not already in the table and hands back a number
+%   past that snapshot.  Every one of the 26 operator symbols the input did
+%   not already mention is created right there, and its op code is written off
+%   the end of the array.
+%
+%   The author knew about the hazard: five other places in the same file guard
+%   with "if (symnum >= Symbols_size)".  The initialisation block is the one
+%   that does not.
+%
+% WHY IT MATTERS
+%   set(production) implies set(eval_rewrite), which is the only caller, so
+%   this fires on every production-mode run -- including every
+%   production-mode example in the Prover9 manual (2inverter, cabbages, jugs,
+%   list, queens3).  It is present in pristine LADR-2009-11A and,
+%   independently confirmed, in the current LADR-2026 release.
+%
+% WHY NOTHING NOTICED FOR SEVENTEEN YEARS
+%   The slots written past the end belong to exactly the operators the input
+%   never mentions, so nothing reads them back.  Fixed and unfixed builds
+%   produce byte-identical output on every example tried.  It is pure heap
+%   corruption with no visible symptom: MALLOC_CHECK_=3 does not catch it
+%   either.  Only a sanitizer sees it, which is why the regression test for it
+%   reports SKIP on an ordinary build rather than a meaningless PASS.
+%
+% RUN IT
+%   An ordinary build shows nothing -- that is the point:
+%       bin/prover9 -f test.src/demos/m7-production-overflow.in
+%
+%   On a build made with -fsanitize=address, the 2009 code reports
+%
+%       ERROR: AddressSanitizer: heap-buffer-overflow
+%       WRITE of size 4
+%           #0 init_dollar_eval ladr/dollar.c:75
+%           #1 index_and_process_initial_clauses provers.src/search.c:2394
+%       0x... is located 0 bytes after 444-byte region
+%
+%   and this tree reports nothing.  The size of the region depends on the
+%   input, since the symbol count does: 444 bytes on the manual's examples,
+%   324 on this one.
+%
+%   Valgrind shows it on the SHIPPED binary with no instrumented build at all,
+%   which is the better demonstration:
+%       valgrind bin/prover9 -f test.src/demos/m7-production-overflow.in
+%------------------------------------------------------------------------------
+
+set(production).
+assign(max_seconds,5).
+
+formulas(sos).
+  p(1 + 1).
+  q(max(3,5)).
+end_of_list.

@@ -1,0 +1,11 @@
+%------------------------------------------------------------------------------
+% Axiom file for the t7-selective-include.p demonstration.
+%
+% i2 exists precisely so that a translator which ignores the include's name
+% list can be caught: the demonstration's conjecture follows from i2 and from
+% nothing else here.
+%------------------------------------------------------------------------------
+
+fof(i1, axiom, p(a)).
+fof(i2, axiom, q(b)).
+fof(i3, axiom, r(c)).
