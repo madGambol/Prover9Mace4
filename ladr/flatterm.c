@@ -218,10 +218,10 @@ Flatterm term_to_flatterm(Term t)
 /* PUBLIC */
 Term flatterm_to_term(Flatterm f)
 {
-  if (VARIABLE(f))
-    return get_variable_term(VARNUM(f));
+  if (FLAT_VARIABLE(f))
+    return get_variable_term(FLAT_VARNUM(f));
   else {
-    Term t = get_rigid_term_dangerously(SYMNUM(f),ARITY(f));
+    Term t = get_rigid_term_dangerously(FLAT_SYMNUM(f),ARITY(f));
     int i;
     Flatterm g = f->next;
     for (i = 0; i < ARITY(f); i++) {
@@ -278,20 +278,20 @@ Flatterm copy_flatterm(Flatterm f)
 /* PUBLIC */
 void print_flatterm(Flatterm f)
 {
-  if (VARIABLE(f)) {
-    if (VARNUM(f) < 3)
-      printf("%c", 'x' + VARNUM(f));
-    else if (VARNUM(f) < 6)
-      printf("%c", 'r' + VARNUM(f));
+  if (FLAT_VARIABLE(f)) {
+    if (FLAT_VARNUM(f) < 3)
+      printf("%c", 'x' + FLAT_VARNUM(f));
+    else if (FLAT_VARNUM(f) < 6)
+      printf("%c", 'r' + FLAT_VARNUM(f));
     else
-      printf("v%d", VARNUM(f));
+      printf("v%d", FLAT_VARNUM(f));
   }
   else if (CONSTANT(f))
-    printf("%s", sn_to_str(SYMNUM(f)));
+    printf("%s", sn_to_str(FLAT_SYMNUM(f)));
   else {
     int i;
     Flatterm g = f->next;
-    printf("%s(", sn_to_str(SYMNUM(f)));
+    printf("%s(", sn_to_str(FLAT_SYMNUM(f)));
     for (i = 0; i < ARITY(f); i++) {
       print_flatterm(g);
       if (i < ARITY(f) - 1)
@@ -314,7 +314,7 @@ void print_flatterm(Flatterm f)
 /* PUBLIC */
 int flatterm_symbol_count(Flatterm f)
 {
-  if (VARIABLE(f))
+  if (FLAT_VARIABLE(f))
     return 1;
   else {
     int n = 1;
@@ -379,8 +379,8 @@ I2list flat_multiset_vars(Flatterm f)
   I2list vars = NULL;
   Flatterm fi;
   for (fi = f; fi != f->end->next; fi = fi->next)
-    if (VARIABLE(fi))
-      vars = multiset_add(vars, VARNUM(fi));
+    if (FLAT_VARIABLE(fi))
+      vars = multiset_add(vars, FLAT_VARNUM(fi));
   return vars;
 }  /* flat_multiset_vars */
 
@@ -416,7 +416,7 @@ BOOL flat_variables_multisubset(Flatterm a, Flatterm b)
 /* PUBLIC */
 int flatterm_count_without_vars(Flatterm f)
 {
-  if (VARIABLE(f))
+  if (FLAT_VARIABLE(f))
     return 0;
   else {
     int n = 1;

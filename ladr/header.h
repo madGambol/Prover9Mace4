@@ -52,6 +52,31 @@ typedef unsigned short ArityType;
 #define MAX_ARITY  ((ArityType) (USHRT_MAX - 1))   /* 65534 */
 #define ARITY_NONE ((ArityType) USHRT_MAX)         /* not an arity */
 
+/* The quantities around variables, each named for what it is.
+ *
+ * These were all spelled "int", which hid a genuine hazard: a term's
+ * private_symbol field holds EITHER a variable number or a rigid symbol
+ * number, told apart only by sign (VARNUM(t) is the field, SYMNUM(t) is its
+ * negation).  Nothing distinguished the two quantities, so passing one where
+ * the other belongs was silently wrong.
+ *
+ *   VarNumType    a variable's number, its identity.  0 .. MAX_VNUM.
+ *   SymNumType    a rigid symbol's number.  1 .. MAX_SYM.
+ *   VarCountType  how many distinct variables something has.  0 .. MAX_VARS.
+ *
+ * A caution about what this does and does not buy.  A C typedef is an alias,
+ * not a distinct type: the compiler will not reject a SymNumType passed where
+ * a VarNumType is wanted, because both are int.  What the names buy is that
+ * the intent is stated at every declaration, and that VarCountType is
+ * deliberately a different width, so mixing a count with a number is at least
+ * visible to -Wconversion.  Detecting the rest needs the checked accessors in
+ * term.h, which assert that a term really is the kind being asked about.
+ */
+
+typedef int            VarNumType;
+typedef int            SymNumType;
+typedef unsigned short VarCountType;
+
 #define IMAX(a,b) ((a) > (b) ? (a) : (b))
 #define IMIN(a,b) ((a) < (b) ? (a) : (b))
 

@@ -151,10 +151,10 @@ Plist discrim_flat_retrieve_leaf(Flatterm fin, Discrim root,
 	f = f->end;
       }
     }
-    else if (VARIABLE(f))
+    else if (FLAT_VARIABLE(f))
       status = BACKTRACK;
     else {
-      int symnum = SYMNUM(f);
+      int symnum = FLAT_SYMNUM(f);
       Discrim dd = NULL;
       while (d && d->symbol < symnum) {
 	dd = d;
@@ -281,7 +281,7 @@ Flatterm fdemod(Flatterm f, Discrim root, Context subst,
 {
   if (*step_limit == 0 || *current_size > size_limit)
     return f;
-  else if (VARIABLE(f))
+  else if (FLAT_VARIABLE(f))
     return f;
   else if (f->reduced_flag) {
     (*sequence) += flatterm_count_without_vars(f);
