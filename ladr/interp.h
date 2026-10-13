@@ -101,7 +101,7 @@ int interp_size(Interp a);
 
 Term interp_comments(Interp a);
 
-int *interp_table(Interp p, char *sym, int arity);
+int *interp_table(Interp p, char *sym, ArityType arity);
 
 long unsigned iso_checks(void);
 

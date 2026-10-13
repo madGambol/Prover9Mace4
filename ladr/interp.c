@@ -453,7 +453,7 @@ void fprint_interp_tex(FILE *fp, Interp p)
   
   for (i = 0; i < p->num_tables; i++) {  /* arity 0 */
     int *table = p->tables[i];
-    int arity = sn_to_arity(i);
+    ArityType arity = sn_to_arity(i);
     if (table != NULL && arity == 0) {
       if (first)
 	first = FALSE;
@@ -464,7 +464,7 @@ void fprint_interp_tex(FILE *fp, Interp p)
   }
   for (i = 0; i < p->num_tables; i++) {  /* arity 1 */
     int *table = p->tables[i];
-    int arity = sn_to_arity(i);
+    ArityType arity = sn_to_arity(i);
     if (table != NULL && arity == 1) {
       int j;
       if (first)
@@ -485,7 +485,7 @@ void fprint_interp_tex(FILE *fp, Interp p)
   }
   for (i = 0; i < p->num_tables; i++) {  /* arity 2 */
     int *table = p->tables[i];
-    int arity = sn_to_arity(i);
+    ArityType arity = sn_to_arity(i);
     if (table != NULL && arity == 2) {
       int j, k;
       if (first)
@@ -513,7 +513,7 @@ void fprint_interp_tex(FILE *fp, Interp p)
   }
   for (i = 0; i < p->num_tables; i++) {  /* arity > 2 */
     int *table = p->tables[i];
-    int arity = sn_to_arity(i);
+    ArityType arity = sn_to_arity(i);
     if (table != NULL && arity > 2) {
       fprintf(fp, "\n\n%% table for arity %d %s %s not printed.\n\n",
 	      arity,
@@ -532,7 +532,7 @@ void fprint_interp_tex(FILE *fp, Interp p)
  *************/
 
 static
-void compute_args(int *a, int arity, int n, int i)
+void compute_args(int *a, ArityType arity, int n, int i)
 {
   int x = i;
   int r;
@@ -577,7 +577,7 @@ void fprint_interp_xml(FILE *fp, Interp p)
 
   for (i = 0; i < p->num_tables; i++) {  /* arity 0 */
     int *table = p->tables[i];
-    int arity = sn_to_arity(i);
+    ArityType arity = sn_to_arity(i);
     char *type = p->types[i] == FUNCTION ? "function" : "relation";
     if (table != NULL && arity == 0) {
       fprintf(fp, "\n    <op0 type=\"%s\">\n", type);
@@ -589,7 +589,7 @@ void fprint_interp_xml(FILE *fp, Interp p)
   
   for (i = 0; i < p->num_tables; i++) {  /* arity 1 */
     int *table = p->tables[i];
-    int arity = sn_to_arity(i); 
+    ArityType arity = sn_to_arity(i); 
     char *type = p->types[i] == FUNCTION ? "function" : "relation";
     if (table != NULL && arity == 1) {
       int j;
@@ -609,7 +609,7 @@ void fprint_interp_xml(FILE *fp, Interp p)
   }
   for (i = 0; i < p->num_tables; i++) {  /* arity 2 */
     int *table = p->tables[i];
-    int arity = sn_to_arity(i);
+    ArityType arity = sn_to_arity(i);
     char *type = p->types[i] == FUNCTION ? "function" : "relation";
     if (table != NULL && arity == 2) {
       int j, k;
@@ -631,7 +631,7 @@ void fprint_interp_xml(FILE *fp, Interp p)
   }
   for (i = 0; i < p->num_tables; i++) {  /* arity > 2 */
     int *table = p->tables[i];
-    int arity = sn_to_arity(i);
+    ArityType arity = sn_to_arity(i);
     char *type = p->types[i] == FUNCTION ? "function" : "relation";
     if (table != NULL && arity > 2) {
       int *a = malloc(arity * sizeof(int));
@@ -683,7 +683,7 @@ void fprint_interp_standard(FILE *fp, Interp p)
     int *table = p->tables[i];
     if (table != NULL) {
       int j, n;
-      int arity = sn_to_arity(i);
+      ArityType arity = sn_to_arity(i);
       fprintf(fp,"    %s(",p->types[i] == FUNCTION ? "function" : "relation");
       if (arity == 0)
 	fprintf(fp, "%s, [",  sn_to_str(i));
@@ -741,7 +741,7 @@ void fprint_interp_standard2(FILE *fp, Interp p)
     int *table = p->tables[i];
     if (table != NULL) {
       int j, n;
-      int arity = sn_to_arity(i);
+      ArityType arity = sn_to_arity(i);
       BOOL w = (arity == 2 && p->size > 10);
       fprintf(fp,"    %s(",p->types[i] == FUNCTION ? "function" : "relation");
       if (arity == 0)
@@ -798,7 +798,7 @@ static void portable_indent(FILE *fp, int n)
 
 static
 void portable_recurse(FILE *fp,
-		       int arity, int domain_size,
+		       ArityType arity, int domain_size,
 		       int *table, int *idx_ptr, int depth)
 {
   if (arity == 0)
@@ -851,7 +851,7 @@ void fprint_interp_portable(FILE *fp, Interp p)
     int *table = p->tables[i];
     if (table != NULL) {
       int j;
-      int arity = sn_to_arity(i);
+      ArityType arity = sn_to_arity(i);
       int idx = 0;
       /* BOOL w = (arity == 2 && p->size > 10); */
       fprintf(fp,"      [\"%s\", \"%s\", %d,\n",
@@ -926,7 +926,7 @@ void fprint_interp_cooked(FILE *fp, Interp p)
     BOOL function = (p->types[i] == FUNCTION);
     if (table != NULL) {
       int j, n;
-      int arity = sn_to_arity(i);
+      ArityType arity = sn_to_arity(i);
 
       fprintf(fp, "\n");
       if (arity == 0) {
@@ -996,7 +996,7 @@ void fprint_interp_tabular(FILE *fp, Interp p)
     int *table = p->tables[f];
     if (table != NULL) {
       int n = p->size;
-      int arity = sn_to_arity(f);
+      ArityType arity = sn_to_arity(f);
 
       fprintf(fp, "\n %s : ", sn_to_str(f));
 
@@ -1082,7 +1082,7 @@ void fprint_interp_raw(FILE *fp, Interp p)
     int *table = p->tables[f];
     if (table != NULL) {
       int n = p->size;
-      int arity = sn_to_arity(f);
+      ArityType arity = sn_to_arity(f);
       int m = int_power(n, arity);
       BOOL function = (p->types[f] == FUNCTION);
       
@@ -1666,7 +1666,7 @@ Interp copy_interp(Interp p)
 
   for (i = 0; i < q->num_tables; i++)
     if (p->tables[i] != NULL) {
-      int arity = p->arities[i];
+      ArityType arity = p->arities[i];
       int n = 1;
       int *ptable, *qtable, j;
       for (j = 0; j < arity; j++)
@@ -1703,7 +1703,7 @@ Interp permute_interp(Interp source, int *p)
     if (source->tables[f] != NULL) {
       int *st = source->tables[f];
       int *dt =   dest->tables[f];
-      int arity = source->arities[f];
+      ArityType arity = source->arities[f];
       BOOL function = (source->types[f] == FUNCTION);
       if (arity == 0)
 	dt[0] = (function ? p[st[0]] : st[0]);
@@ -1770,7 +1770,7 @@ BOOL ident_interp_perm(Interp a, Interp b, int *p)
     if (a->tables[f] != NULL) {
       int *at =   a->tables[f];
       int *bt =   b->tables[f];
-      int arity = a->arities[f];
+      ArityType arity = a->arities[f];
       BOOL function = (a->types[f] == FUNCTION);
       if (arity == 0) {
 	if (bt[0] != (function ? p[at[0]] : at[0]))
@@ -1998,7 +1998,7 @@ Given a symbol and arity, return the corresponding table.
 */
 
 /* PUBLIC */
-int *interp_table(Interp p, char *sym, int arity)
+int *interp_table(Interp p, char *sym, ArityType arity)
 {
   int f;
   for (f = 0; f < p->num_tables; f++)
@@ -2305,7 +2305,7 @@ Ordertype compare_permed_interps(int *x, int *y, int *xx, int *yy, Interp a)
   for (f = 0; f < a->num_tables; f++) {
     if (a->tables[f] != NULL) {
       int *t =   a->tables[f];
-      int arity = a->arities[f];
+      ArityType arity = a->arities[f];
       BOOL function = (a->types[f] == FUNCTION);
       if (arity == 0) {
 	Ordertype result;

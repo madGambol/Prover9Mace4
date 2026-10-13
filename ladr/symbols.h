@@ -124,7 +124,7 @@ char *get_operation_symbol(char *operation);
 
 BOOL symbol_in_use(char *str);
 
-int str_to_sn(char *str, int arity);
+int str_to_sn(char *str, ArityType arity);
 
 void fprint_syms(FILE *fp);
 
@@ -142,9 +142,9 @@ int greatest_symnum(void);
 
 char *sn_to_str(int symnum);
 
-BOOL is_symbol(int symnum, char *str, int arity);
+BOOL is_symbol(int symnum, char *str, ArityType arity);
 
-int sn_to_arity(int symnum);
+ArityType sn_to_arity(int symnum);
 
 int sn_to_occurrences(int symnum);
 
@@ -241,7 +241,7 @@ void set_skolem(int symnum);
 
 void skolem_check(BOOL flag);
 
-int next_skolem_symbol(int arity);
+int next_skolem_symbol(ArityType arity);
 
 Ilist skolem_symbols(void);
 
@@ -295,9 +295,9 @@ void lex_insert_after_initial_constants(Ilist syms);
 
 void add_skolems_to_preliminary_precedence(void);
 
-int fresh_symbol(char *prefix, int arity);
+int fresh_symbol(char *prefix, ArityType arity);
 
-int gen_new_symbol(char *prefix, int arity, Ilist syms);
+int gen_new_symbol(char *prefix, ArityType arity, Ilist syms);
 
 void mark_for_new_symbols(void);
 

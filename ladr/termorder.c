@@ -306,7 +306,7 @@ static
 BOOL lrpo_lex(Term s, Term t, BOOL lex_order_vars)
 {
   int i;
-  int arity = ARITY(s);
+  ArityType arity = ARITY(s);
 
   /* First skip over any identical arguments. */
 
@@ -677,7 +677,7 @@ BOOL flat_lrpo_multiset(Flatterm s, Flatterm t)
 static
 BOOL flat_lrpo_lex(Flatterm s, Flatterm t, BOOL lex_order_vars)
 {
-  int arity = ARITY(s);
+  ArityType arity = ARITY(s);
 
   /* First skip over any identical arguments. */
 

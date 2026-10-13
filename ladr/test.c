@@ -21,7 +21,7 @@
 
 #define N 5
 
-void compute_args(int *a, int arity, int n, int i)
+void compute_args(int *a, ArityType arity, int n, int i)
 {
   int x = i;
   int r;

@@ -44,7 +44,7 @@ typedef struct symbol_data * Symbol_data;
 struct symbol_data {  /* SORT */
   int sn;             /* ordinary symbol ID */
   int mace_sn;        /* MACE symbol ID */
-  int arity;
+  ArityType arity;
   int type;           /* FUNCTION or RELATION */
   int base;
   int attribute;      /* ORDINARY_SYMBOL or EQUALITY_SYMBOL */

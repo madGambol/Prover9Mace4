@@ -2929,7 +2929,7 @@ Prover_results forking_search(Prover_input input)
       num_new_symbols = ibuf_read(ibuf);
       for (i = 0; i < num_new_symbols; i++) {
 	int symnum = ibuf_read(ibuf);
-	int arity = ibuf_read(ibuf);
+	ArityType arity = ibuf_read(ibuf);
 	new_syms = i2list_append(new_syms, symnum, arity);
       }
       add_new_symbols(new_syms);  /* add new symbols to symbol table */

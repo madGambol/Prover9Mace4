@@ -23,7 +23,7 @@
 struct symbol {
   int         symnum;           /* unique identifier */
   char        *name;            /* the print symbol */
-  int         arity;            /* 0 for constants */
+  ArityType       arity;            /* 0 for constants, ARITY_NONE if unset */
   Symbol_type type;             /* function, relation, unspecified */
   Parsetype   parse_type;       /* infix, prefix, etc. */
   int         parse_prec;       /* precedence for parsing/printing */
@@ -432,7 +432,7 @@ Symbol get_symbol(void)
   p->symnum = 0;
   p->parse_type = NOTHING_SPECIAL;
   p->parse_prec = 0;
-  p->arity = -1;
+  p->arity = ARITY_NONE;   /* arity unspecified */
   p->unif_theory = EMPTY_THEORY;
   p->occurrences = -1;
   p->lex_val = INT_MAX;
@@ -467,7 +467,7 @@ int new_symnum(void)
  *************/
 
 static
-unsigned hash_sym(char *s, int arity)
+unsigned hash_sym(char *s, ArityType arity)
 {
   unsigned x = arity;
   while (*s != '\0') {
@@ -515,7 +515,7 @@ Symbol lookup_by_id(int symnum)
  *************/
 
 static
-Symbol lookup_by_sym(char *name, int arity)
+Symbol lookup_by_sym(char *name, ArityType arity)
 {
   Plist p;
   for (p = By_sym[hash_sym(name,arity)]; p; p = p->next) {
@@ -541,7 +541,7 @@ There is no limit on the length of the string (which is copied).
 */
 
 /* PUBLIC */
-int str_to_sn(char *str, int arity)
+int str_to_sn(char *str, ArityType arity)
 {
   Symbol s = lookup_by_sym(str, arity);
 
@@ -744,7 +744,7 @@ This Boolean routine checks if a given symbol ID matches a given
 */
 
 /* PUBLIC */
-BOOL is_symbol(int symnum, char *str, int arity)
+BOOL is_symbol(int symnum, char *str, ArityType arity)
 {
   Symbol n = lookup_by_id(symnum);
   if (n == NULL)
@@ -755,7 +755,7 @@ BOOL is_symbol(int symnum, char *str, int arity)
 
 /*************
  *
- *    int sn_to_arity(symnum)  --  given a symbol number, return the arity
+ *    ArityType sn_to_arity(symnum)  --  given a symbol number, return the arity
  *
  *************/
 
@@ -764,11 +764,11 @@ This routine returns the arity associated with a symbol ID.
 */
 
 /* PUBLIC */
-int sn_to_arity(int symnum)
+ArityType sn_to_arity(int symnum)
 {
   Symbol p = lookup_by_id(symnum);
   if (p == NULL)
-    return(-1);
+    return(ARITY_NONE);    /* was -1, which an ArityType cannot hold */
   else
     return(p->arity);
 }  /* sn_to_arity */
@@ -1851,7 +1851,7 @@ void skolem_check(BOOL flag)
  *************/
 
 static
-BOOL skolem_ok(char *name, int arity)
+BOOL skolem_ok(char *name, ArityType arity)
 {
   if (!Skolem_check)
     return TRUE;
@@ -1880,7 +1880,7 @@ in the symbol table (with any arity), they will be skipped.
 */
 
 /* PUBLIC */
-int next_skolem_symbol(int arity)
+int next_skolem_symbol(ArityType arity)
 {
   /* Sized for the longest prefix the symbol table can hold plus a full
      int, so it stays correct if the prefixes above ever change. */
@@ -2757,7 +2757,7 @@ int *fresh_counter(char *prefix)
 }  /* fresh_counter */
 
 /* PUBLIC */
-int fresh_symbol(char *prefix, int arity)
+int fresh_symbol(char *prefix, ArityType arity)
 {
   char name[MAX_NAME + INT_STRING_SIZE];
   int *next;
@@ -2797,7 +2797,7 @@ int fresh_symbol(char *prefix, int arity)
 */
 
 /* PUBLIC */
-int gen_new_symbol(char *prefix, int arity, Ilist syms)
+int gen_new_symbol(char *prefix, ArityType arity, Ilist syms)
 {
   char name[MAX_NAME + INT_STRING_SIZE];
   int symnum;
@@ -2871,7 +2871,7 @@ void add_new_symbols(I2list syms)
   for (p = syms; p; p = p->next) {
     int sn;
     int symnum = p->i;
-    int arity = p->j;
+    ArityType arity = p->j;
     if (symnum != Symbol_count+1)
       fatal_error("add_new_symbols, bad symnum");
     sn = fresh_symbol("child_symbol_", arity);

@@ -201,7 +201,7 @@ void zap_discrim_tree(Discrim d, int n)
     zap_plist(d->u.data);
   }
   else {
-    int arity;
+    ArityType arity;
     Discrim k, prev;
 
     k = d->u.kids;
