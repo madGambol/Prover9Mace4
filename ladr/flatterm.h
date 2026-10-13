@@ -65,6 +65,20 @@ struct flatterm {
   BOOL reduced_flag;             /* fully demodulated */
 };
 
+/* Flatterm has its own accessors for the same reason struct term does: its
+   private_symbol field holds either a variable number or a rigid symbol
+   number, distinguished by sign.
+
+   These exist separately because a Flatterm is not a Term.  The term macros
+   used to be applied to flatterms as well -- they are untyped macros and both
+   structs happen to have a field of that name, so it compiled -- and naming
+   the quantities is what brought that to light.  Fifteen uses in flatterm.c
+   were reaching through the wrong type's accessor. */
+
+#define FLAT_VARIABLE(f) ((f)->private_symbol >= 0)
+#define FLAT_SYMNUM(f)   ((SymNumType) (-((f)->private_symbol)))
+#define FLAT_VARNUM(f)   ((VarNumType) ((f)->private_symbol))
+
 /* End of public definitions */
 
 /* Public function prototypes from flatterm.c */

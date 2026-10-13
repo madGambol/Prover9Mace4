@@ -247,8 +247,8 @@ Ordertype flatterm_compare_vr(Flatterm a, Flatterm b)
 {
   Ordertype  rc;
 
-  if (!VARIABLE(a) && !VARIABLE(b)) {
-    if (SYMNUM(a) == SYMNUM(b)) {
+  if (!FLAT_VARIABLE(a) && !FLAT_VARIABLE(b)) {
+    if (FLAT_SYMNUM(a) == FLAT_SYMNUM(b)) {
       int i;
       Flatterm ai = a->next;
       Flatterm bi = b->next;
@@ -259,17 +259,17 @@ Ordertype flatterm_compare_vr(Flatterm a, Flatterm b)
       }
     }
     else
-      rc = sym_precedence(SYMNUM(a), SYMNUM(b));
+      rc = sym_precedence(FLAT_SYMNUM(a), FLAT_SYMNUM(b));
   }
 
-  else if (VARIABLE(a) && VARIABLE(b)) {
-    if (VARNUM(a) == VARNUM(b))
+  else if (FLAT_VARIABLE(a) && FLAT_VARIABLE(b)) {
+    if (FLAT_VARNUM(a) == FLAT_VARNUM(b))
       rc = SAME_AS;
     else
-      rc = (VARNUM(a) > VARNUM(b) ? GREATER_THAN : LESS_THAN);
+      rc = (FLAT_VARNUM(a) > FLAT_VARNUM(b) ? GREATER_THAN : LESS_THAN);
   }
 
-  else if (VARIABLE(a))
+  else if (FLAT_VARIABLE(a))
     rc = LESS_THAN;
   else
     rc = GREATER_THAN;
@@ -578,10 +578,10 @@ Ordertype term_order(Term alpha, Term beta)
 /* PUBLIC */
 int flat_kbo_weight(Flatterm f)
 {
-  if (VARIABLE(f))
+  if (FLAT_VARIABLE(f))
     return 1;
   else {
-    int wt = sn_to_kb_wt(SYMNUM(f));
+    int wt = sn_to_kb_wt(FLAT_SYMNUM(f));
     int i;
     Flatterm fi = f->next;
     for (i = 0; i < ARITY(f); i++) {
@@ -601,20 +601,20 @@ int flat_kbo_weight(Flatterm f)
 static
 BOOL flat_kbo(Flatterm alpha, Flatterm beta, BOOL lex_order_vars)
 {
-  if (VARIABLE(alpha)) {
+  if (FLAT_VARIABLE(alpha)) {
     if (lex_order_vars)
-      return VARIABLE(beta) && VARNUM(alpha) > VARNUM(beta);
+      return FLAT_VARIABLE(beta) && FLAT_VARNUM(alpha) > FLAT_VARNUM(beta);
     else
       return FALSE;
   }
-  else if (VARIABLE(beta)) {
+  else if (FLAT_VARIABLE(beta)) {
     if (lex_order_vars)
       return TRUE;
     else
       return flat_occurs_in(beta, alpha);
   }
   else if (ARITY(alpha) == 1 && ARITY(beta) == 1 &&
-	   SYMNUM(alpha) == SYMNUM(beta))
+	   FLAT_SYMNUM(alpha) == FLAT_SYMNUM(beta))
     return flat_kbo(alpha->next, beta->next, lex_order_vars);
   else if (!flat_variables_multisubset(beta, alpha))
     return FALSE;
@@ -629,9 +629,9 @@ BOOL flat_kbo(Flatterm alpha, Flatterm beta, BOOL lex_order_vars)
       return FALSE;
     else if (!flat_variables_multisubset(alpha, beta))
       return FALSE;  /* multisets of variables must be the same */
-    else if (sym_precedence(SYMNUM(alpha), SYMNUM(beta)) == GREATER_THAN)
+    else if (sym_precedence(FLAT_SYMNUM(alpha), FLAT_SYMNUM(beta)) == GREATER_THAN)
       return TRUE;
-    else if (SYMNUM(alpha) != SYMNUM(beta))
+    else if (FLAT_SYMNUM(alpha) != FLAT_SYMNUM(beta))
       return FALSE;
     else {
       Flatterm ai = alpha->next;
@@ -663,7 +663,7 @@ BOOL flat_lrpo_multiset(Flatterm s, Flatterm t)
   p_syms();
   p_flatterm(s);
   p_flatterm(t);
-  printf("lex vals: %d %d\n", sn_to_lex_val(SYMNUM(s)), sn_to_lex_val(SYMNUM(s)));
+  printf("lex vals: %d %d\n", sn_to_lex_val(FLAT_SYMNUM(s)), sn_to_lex_val(FLAT_SYMNUM(s)));
   fatal_error("flat_lrpo_multiset not implemented");
   return FALSE;
 }  /* flat_lrpo_multiset */
@@ -731,27 +731,27 @@ BOOL flat_lrpo_lex(Flatterm s, Flatterm t, BOOL lex_order_vars)
 /* PUBLIC */
 BOOL flat_lrpo(Flatterm s, Flatterm t, BOOL lex_order_vars)
 {
-  if (VARIABLE(s)) {
+  if (FLAT_VARIABLE(s)) {
     if (lex_order_vars)
-      return VARIABLE(t) && VARNUM(s) > VARNUM(t);
+      return FLAT_VARIABLE(t) && FLAT_VARNUM(s) > FLAT_VARNUM(t);
     else
       return FALSE;
   }
 
-  else if (VARIABLE(t)) {
+  else if (FLAT_VARIABLE(t)) {
     if (lex_order_vars)
       return TRUE;
     else
       return flat_occurs_in(t, s);
   }
 
-  else if (SYMNUM(s) == SYMNUM(t) &&
-	   sn_to_lrpo_status(SYMNUM(s)) == LRPO_LR_STATUS)
+  else if (FLAT_SYMNUM(s) == FLAT_SYMNUM(t) &&
+	   sn_to_lrpo_status(FLAT_SYMNUM(s)) == LRPO_LR_STATUS)
     /* both have the same "left-to-right" symbol. */
     return flat_lrpo_lex(s, t, lex_order_vars);
 
   else {
-    Ordertype p = sym_precedence(SYMNUM(s), SYMNUM(t));
+    Ordertype p = sym_precedence(FLAT_SYMNUM(s), FLAT_SYMNUM(t));
 
     if (p == SAME_AS)
       return flat_lrpo_multiset(s, t);

@@ -73,6 +73,34 @@ static unsigned Arg_mem;  /* memory (pointers) for arrays of args */
  *
  *************/
 
+/* The checked forms of SYMNUM() and VARNUM(), used when the library is built
+   with -DCHECK_TERM_KIND.  See the comment on those macros in term.h: the
+   field they read holds either kind of number, so asking for the wrong one
+   yields a plausible number of the wrong kind rather than an error. */
+
+#ifdef CHECK_TERM_KIND
+
+SymNumType term_symnum_checked(Term t, const char *file, int line)
+{
+  if (t->private_symbol >= 0) {
+    fprintf(stderr, "%s:%d: SYMNUM() applied to a VARIABLE term\n", file, line);
+    fatal_error("SYMNUM of a variable term");
+  }
+  return (SymNumType) (-(t->private_symbol));
+}  /* term_symnum_checked */
+
+VarNumType term_varnum_checked(Term t, const char *file, int line)
+{
+  if (t->private_symbol < 0) {
+    fprintf(stderr, "%s:%d: VARNUM() applied to a non-VARIABLE term\n",
+	    file, line);
+    fatal_error("VARNUM of a non-variable term");
+  }
+  return (VarNumType) t->private_symbol;
+}  /* term_varnum_checked */
+
+#endif  /* CHECK_TERM_KIND */
+
 static
 Term get_term(int arity)
 {
