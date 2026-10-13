@@ -109,11 +109,37 @@ struct term {
 #define CONSTANT(t) ((t)->private_symbol < 0 && (t)->arity == 0)
 #define COMPLEX(t)  ((t)->private_symbol < 0 && (t)->arity > 0)
 
+/* A term's private_symbol field holds either a variable number or a rigid
+   symbol number, told apart by sign, and these two accessors are the only
+   way to read it.  Asking for the wrong one gives a plausible-looking number
+   of the wrong kind: SYMNUM() of a variable is a negative "symbol", and
+   VARNUM() of a constant is a negative "variable".  Either reads as data and
+   is then used as an index.
+
+   Built with -DCHECK_TERM_KIND, each accessor asserts that the term really is
+   the kind being asked about, which turns that silent confusion into an
+   immediate, located failure.  It is off by default because these two macros
+   are among the most heavily used expressions in the system, and on because
+   it is cheap to turn on while working.  test.src/varnum_test.c checks that
+   the accessors agree with the term kind either way. */
+
+#ifdef CHECK_TERM_KIND
+
+SymNumType term_symnum_checked(Term t, const char *file, int line);
+VarNumType term_varnum_checked(Term t, const char *file, int line);
+
+#define SYMNUM(t)   term_symnum_checked((t), __FILE__, __LINE__)
+#define VARNUM(t)   term_varnum_checked((t), __FILE__, __LINE__)
+
+#else
+
 /* to get symbol ID from a CONSTANT or COMPLEX term */
-#define SYMNUM(t)   (-((t)->private_symbol))
+#define SYMNUM(t)   ((SymNumType) (-((t)->private_symbol)))
 
 /* to get the variable number of a VARIABLE term */
-#define VARNUM(t)   ((t)->private_symbol)
+#define VARNUM(t)   ((VarNumType) ((t)->private_symbol))
+
+#endif
 
 /* to get the arity of a term (VARIABLE terms have arity 0) */
 #define ARITY(t)    ((t)->arity)
