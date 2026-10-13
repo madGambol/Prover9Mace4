@@ -1926,18 +1926,61 @@ BOOL i2list_multisubset(I2list a, I2list b)
 Add n occurrences of i to multiset a.
 */
 
+/* This was recursive, one frame per distinct element already in the multiset,
+   appending a new element at the tail:
+
+     if (a == NULL)             { a = get_i2list(); a->i = i; a->j = n; }
+     else if (a->i == i)          a->j += n;
+     else                         a->next = multiset_add_n(a->next, i, n);
+
+   Two problems, both reached by the same input -- the multiset of symbols in a
+   large file, which has no cap on the number of distinct elements:
+
+   1. The recursion is as deep as the multiset is long.  At 250,000 distinct
+      symbols it overflows the default 8 MB stack and the process dies with no
+      diagnostic.  That is what this rewrite fixes: it is the same walk, with
+      the same tail append and therefore the same first-seen ordering, written
+      as a loop.
+
+   2. The walk itself is O(length) per insertion, so building a multiset of N
+      distinct elements costs O(N^2).  Measured, distinct symbols against
+      elapsed time to build:
+
+          4,000 ->  105 ms     16,000 -> 1,576 ms
+          8,000 ->  327 ms     32,000 -> 7,439 ms
+
+      -- a 4x time for each 2x of input.  The same total number of occurrences
+      spread over ONE symbol takes 45/87/236/794 ms, confirming the cost is the
+      search and not the counting.  Raising the stack limit to 1 GB does not
+      help the 250,000-symbol case: it stops segfaulting and instead runs past
+      a 300-second CPU limit.  The crash was the symptom; this is the disease.
+
+      Making the loop iterative cannot fix that -- a linear search is linear
+      however it is written.  I2accum, below, is the fix, and the callers that
+      can see an unbounded number of distinct symbols now use it.  This
+      function is left as the small-multiset interface it always was (the
+      multiset of variables in a clause, which MAX_VARS caps at 100), now
+      without the stack-depth hazard. */
+
 /* PUBLIC */
 I2list multiset_add_n(I2list a, int i, int n)
 {
-  if (a == NULL) {
-    a = get_i2list();
-    a->i = i;
-    a->j = n;
-  }
-  else if (a->i == i)
-    a->j += n;
-  else
-    a->next = multiset_add_n(a->next, i, n);
+  I2list p, prev;
+
+  for (p = a, prev = NULL; p; prev = p, p = p->next)
+    if (p->i == i) {
+      p->j += n;
+      return a;
+    }
+
+  /* not present: append at the tail, which is where the recursive version put
+     it, so the multiset stays in first-seen order */
+  p = get_i2list();
+  p->i = i;
+  p->j = n;
+  if (prev == NULL)
+    return p;
+  prev->next = p;
   return a;
 }  /* multiset_add_n */
 
@@ -1988,17 +2031,27 @@ I2list multiset_union(I2list a, I2list b)
 /* DOCUMENTATION
 */
 
+/* This was recursive, one frame per element, which overflows the stack on the
+   same large-multiset inputs that broke multiset_add_n above.  Iterative now,
+   building the result front to back so the order is unchanged. */
+
 /* PUBLIC */
 Ilist multiset_to_set(I2list m)
 {
-  if (m == NULL)
-    return NULL;
-  else {
+  Ilist head = NULL, tail = NULL;
+  I2list q;
+
+  for (q = m; q; q = q->next) {
     Ilist p = get_ilist();
-    p->i = m->i;
-    p->next = multiset_to_set(m->next);
-    return p;
+    p->i = q->i;
+    p->next = NULL;
+    if (tail == NULL)
+      head = p;
+    else
+      tail->next = p;
+    tail = p;
   }
+  return head;
 }  /* multiset_to_set */
 
 /*************
@@ -2016,4 +2069,336 @@ int multiset_occurrences(I2list m, int i)
   I2list a = i2list_member(m, i);
   return (a == NULL ? 0 : a->j);
 }  /* multiset_occurrences */
+
+/*************
+ *
+ *   I2accum -- a multiset of ints with O(1) amortised insertion
+ *
+ *************/
+
+/* A multiset of ints, same abstraction as the I2list multisets above, built
+   for the case where the number of DISTINCT elements is large and unbounded:
+   the symbols in an input file.  multiset_add_n() searches a list, so building
+   such a multiset is O(N^2) in the number of distinct symbols -- see the long
+   comment on that function for the measurements.
+
+   Representation: an open-addressed hash table of slots indexed by a hash of
+   the key, each occupied slot holding an index into two parallel arrays that
+   are append-only and therefore in FIRST-SEEN ORDER.  That ordering is not
+   incidental -- it is the order multiset_add_n() produces, and
+   i2accum_to_i2list() reproduces it exactly, so an I2list built either way is
+   indistinguishable.  Symbol precedence is derived from these lists, and
+   precedence decides the term ordering, which decides which equations are used
+   as rewrite rules; a different order here would silently change every proof.
+
+   Keys may be any int, including 0 and negatives, so there is no value free to
+   use as an "empty slot" marker.  Empty is -1 in the slot array instead, which
+   is not a valid index into the key array. */
+
+struct i2accum {
+  int *slot;        /* capacity entries: -1, or an index into key/count */
+  int *key;         /* distinct entries, in first-seen order */
+  int *count;       /* distinct entries, parallel to key */
+  int  capacity;    /* slot count; a power of two, so mask == capacity-1 */
+  int  distinct;    /* entries used in key/count */
+  int  allocated;   /* entries available in key/count */
+};
+
+#define PTRS_I2ACCUM PTRS(sizeof(struct i2accum))
+static unsigned I2accum_gets, I2accum_frees;
+
+/* Start small: most multisets are small, and this doubles cheaply.  Both must
+   be powers of two for the mask to work. */
+#define I2ACCUM_INIT_SLOTS   64
+#define I2ACCUM_INIT_ENTRIES 32
+
+/* Knuth's multiplicative hash.  The key is cast through unsigned so that a
+   negative key shifts predictably rather than by implementation choice, and
+   the high bits -- the ones the multiply actually mixes -- are the ones kept. */
+static int i2accum_hash(int i, int capacity)
+{
+  unsigned h = (unsigned) i * 2654435761u;
+  return (int) ((h >> 4) & (unsigned) (capacity - 1));
+}
+
+/* Find the slot for key i: either the one holding it, or the empty one where
+   it belongs.  The table is never allowed to fill (see the load factor in
+   i2accum_add_n), so the probe always terminates. */
+static int i2accum_probe(I2accum acc, int i)
+{
+  int mask = acc->capacity - 1;
+  int h = i2accum_hash(i, acc->capacity);
+  while (acc->slot[h] != -1 && acc->key[acc->slot[h]] != i)
+    h = (h + 1) & mask;
+  return h;
+}
+
+static void i2accum_rehash(I2accum acc, int new_capacity)
+{
+  int *old_slot = acc->slot;
+  int old_capacity = acc->capacity;
+  int k;
+
+  acc->slot = (int *) get_mem(PTRS(new_capacity * sizeof(int)));
+  acc->capacity = new_capacity;
+  for (k = 0; k < new_capacity; k++)
+    acc->slot[k] = -1;
+  /* reinsert by entry index, which preserves key/count and so the order */
+  for (k = 0; k < acc->distinct; k++)
+    acc->slot[i2accum_probe(acc, acc->key[k])] = k;
+
+  if (old_slot)
+    free_mem(old_slot, PTRS(old_capacity * sizeof(int)));
+}
+
+static void i2accum_grow_entries(I2accum acc)
+{
+  int new_allocated = acc->allocated * 2;
+  int *new_key   = (int *) get_mem(PTRS(new_allocated * sizeof(int)));
+  int *new_count = (int *) get_mem(PTRS(new_allocated * sizeof(int)));
+  int k;
+
+  for (k = 0; k < acc->distinct; k++) {
+    new_key[k]   = acc->key[k];
+    new_count[k] = acc->count[k];
+  }
+  free_mem(acc->key,   PTRS(acc->allocated * sizeof(int)));
+  free_mem(acc->count, PTRS(acc->allocated * sizeof(int)));
+  acc->key = new_key;
+  acc->count = new_count;
+  acc->allocated = new_allocated;
+}
+
+/*************
+ *
+ *   get_i2accum()
+ *
+ *************/
+
+/* DOCUMENTATION
+Return an empty multiset accumulator.  Free it with zap_i2accum(), or hand it
+to i2accum_to_i2list(), which frees it for you.
+*/
+
+/* PUBLIC */
+I2accum get_i2accum(void)
+{
+  I2accum acc = (I2accum) get_mem(PTRS_I2ACCUM);
+  int k;
+
+  I2accum_gets++;
+  acc->capacity  = I2ACCUM_INIT_SLOTS;
+  acc->allocated = I2ACCUM_INIT_ENTRIES;
+  acc->distinct  = 0;
+  acc->slot  = (int *) get_mem(PTRS(acc->capacity  * sizeof(int)));
+  acc->key   = (int *) get_mem(PTRS(acc->allocated * sizeof(int)));
+  acc->count = (int *) get_mem(PTRS(acc->allocated * sizeof(int)));
+  for (k = 0; k < acc->capacity; k++)
+    acc->slot[k] = -1;
+  return acc;
+}  /* get_i2accum */
+
+/*************
+ *
+ *   zap_i2accum()
+ *
+ *************/
+
+/* DOCUMENTATION
+Free an accumulator.  Harmless on NULL.
+*/
+
+/* PUBLIC */
+void zap_i2accum(I2accum acc)
+{
+  if (acc == NULL)
+    return;
+  I2accum_frees++;
+  free_mem(acc->slot,  PTRS(acc->capacity  * sizeof(int)));
+  free_mem(acc->key,   PTRS(acc->allocated * sizeof(int)));
+  free_mem(acc->count, PTRS(acc->allocated * sizeof(int)));
+  free_mem(acc, PTRS_I2ACCUM);
+}  /* zap_i2accum */
+
+/*************
+ *
+ *   i2accum_add_n()
+ *
+ *************/
+
+/* DOCUMENTATION
+Add n occurrences of i to the accumulator.
+*/
+
+/* PUBLIC */
+void i2accum_add_n(I2accum acc, int i, int n)
+{
+  int h = i2accum_probe(acc, i);
+
+  if (acc->slot[h] != -1) {
+    acc->count[acc->slot[h]] += n;
+    return;
+  }
+
+  if (acc->distinct == acc->allocated)
+    i2accum_grow_entries(acc);
+
+  acc->key[acc->distinct]   = i;
+  acc->count[acc->distinct] = n;
+  acc->slot[h] = acc->distinct;
+  acc->distinct++;
+
+  /* Keep the load factor at or below 1/2.  Open addressing with linear probing
+     degrades badly as a table fills -- at 90% full the average probe is ten
+     slots and the quadratic comes back in a new costume.  Rehashing after the
+     insert, rather than before, keeps h valid above. */
+  if (acc->distinct * 2 >= acc->capacity)
+    i2accum_rehash(acc, acc->capacity * 2);
+}  /* i2accum_add_n */
+
+/*************
+ *
+ *   i2accum_add()
+ *
+ *************/
+
+/* DOCUMENTATION
+Add 1 occurrence of i to the accumulator.
+*/
+
+/* PUBLIC */
+void i2accum_add(I2accum acc, int i)
+{
+  i2accum_add_n(acc, i, 1);
+}  /* i2accum_add */
+
+/*************
+ *
+ *   i2accum_occurrences()
+ *
+ *************/
+
+/* DOCUMENTATION
+How many occurrences of i are in the accumulator?  0 if it is absent.
+This is the O(1) counterpart of multiset_occurrences(), which walks a list.
+*/
+
+/* PUBLIC */
+int i2accum_occurrences(I2accum acc, int i)
+{
+  int h = i2accum_probe(acc, i);
+  return (acc->slot[h] == -1 ? 0 : acc->count[acc->slot[h]]);
+}  /* i2accum_occurrences */
+
+/*************
+ *
+ *   i2accum_distinct()
+ *
+ *************/
+
+/* DOCUMENTATION
+How many distinct elements are in the accumulator?
+*/
+
+/* PUBLIC */
+int i2accum_distinct(I2accum acc)
+{
+  return acc->distinct;
+}  /* i2accum_distinct */
+
+/*************
+ *
+ *   i2accum_to_i2list()
+ *
+ *************/
+
+/* DOCUMENTATION
+Convert to an ordinary I2list multiset, in first-seen order -- the same order
+multiset_add_n() would have produced.  The accumulator is freed; do not refer
+to it after the call.
+*/
+
+/* PUBLIC */
+I2list i2accum_to_i2list(I2accum acc)
+{
+  I2list head = NULL, tail = NULL;
+  int k;
+
+  if (acc == NULL)
+    return NULL;
+
+  for (k = 0; k < acc->distinct; k++) {
+    I2list p = get_i2list();
+    p->i = acc->key[k];
+    p->j = acc->count[k];
+    p->next = NULL;
+    if (tail == NULL)
+      head = p;
+    else
+      tail->next = p;
+    tail = p;
+  }
+  zap_i2accum(acc);
+  return head;
+}  /* i2accum_to_i2list */
+
+/*************
+ *
+ *   i2accum_to_set()
+ *
+ *************/
+
+/* DOCUMENTATION
+The distinct elements of the accumulator, in first-seen order, as an Ilist.
+The accumulator is NOT freed -- callers that want both the set and the counts
+need it to survive.  Equivalent to multiset_to_set(i2accum_to_i2list(acc)) but
+without building the intermediate multiset.
+*/
+
+/* PUBLIC */
+Ilist i2accum_to_set(I2accum acc)
+{
+  Ilist head = NULL, tail = NULL;
+  int k;
+
+  if (acc == NULL)
+    return NULL;
+
+  for (k = 0; k < acc->distinct; k++) {
+    Ilist p = get_ilist();
+    p->i = acc->key[k];
+    p->next = NULL;
+    if (tail == NULL)
+      head = p;
+    else
+      tail->next = p;
+    tail = p;
+  }
+  return head;
+}  /* i2accum_to_set */
+
+/*************
+ *
+ *   i2list_to_i2accum()
+ *
+ *************/
+
+/* DOCUMENTATION
+Build an accumulator holding the same multiset as the given I2list, which is
+left alone.  This exists so that the public gather routines can keep taking an
+"I2list *" accumulator argument -- the caller's existing contents are seeded
+here, the gathering runs against the accumulator, and the result is converted
+back.  A NULL list, which is what every caller in the tree actually passes,
+gives an empty accumulator.
+*/
+
+/* PUBLIC */
+I2accum i2list_to_i2accum(I2list m)
+{
+  I2accum acc = get_i2accum();
+  I2list p;
+  for (p = m; p; p = p->next)
+    i2accum_add_n(acc, p->i, p->j);
+  return acc;
+}  /* i2list_to_i2accum */
 

@@ -650,15 +650,27 @@ void inherit_attributes(Topform par1, Context s1,
 */
 
 /* PUBLIC */
-void gather_symbols_in_topform(Topform c, I2list *rsyms, I2list *fsyms)
+void gather_symbols_in_topform_acc(Topform c, I2accum rsyms, I2accum fsyms)
 {
   if (c->is_formula)
-    gather_symbols_in_formula(c->formula, rsyms, fsyms);
+    gather_symbols_in_formula_acc(c->formula, rsyms, fsyms);
   else {
     Literals lit;
     for (lit = c->literals; lit; lit = lit->next)
-      gather_symbols_in_formula_term(lit->atom, rsyms, fsyms);
+      gather_symbols_in_formula_term_acc(lit->atom, rsyms, fsyms);
   }
+}  /* gather_symbols_in_topform_acc */
+
+/* PUBLIC */
+void gather_symbols_in_topform(Topform c, I2list *rsyms, I2list *fsyms)
+{
+  I2accum r = i2list_to_i2accum(*rsyms);
+  I2accum f = i2list_to_i2accum(*fsyms);
+  zap_i2list(*rsyms);
+  zap_i2list(*fsyms);
+  gather_symbols_in_topform_acc(c, r, f);
+  *rsyms = i2accum_to_i2list(r);
+  *fsyms = i2accum_to_i2list(f);
 }  /* gather_symbols_in_topform */
 
 /*************
@@ -671,11 +683,26 @@ void gather_symbols_in_topform(Topform c, I2list *rsyms, I2list *fsyms)
 */
 
 /* PUBLIC */
-void gather_symbols_in_topforms(Plist lst, I2list *rsyms, I2list *fsyms)
+void gather_symbols_in_topforms_acc(Plist lst, I2accum rsyms, I2accum fsyms)
 {
   Plist p;
   for (p = lst; p; p = p->next)
-    gather_symbols_in_topform(p->v, rsyms, fsyms);
+    gather_symbols_in_topform_acc(p->v, rsyms, fsyms);
+}  /* gather_symbols_in_topforms_acc */
+
+/* PUBLIC */
+void gather_symbols_in_topforms(Plist lst, I2list *rsyms, I2list *fsyms)
+{
+  /* One conversion for the whole clause list.  Calling the single-clause
+     wrapper in this loop would convert once per clause and put back the
+     quadratic this is here to remove. */
+  I2accum r = i2list_to_i2accum(*rsyms);
+  I2accum f = i2list_to_i2accum(*fsyms);
+  zap_i2list(*rsyms);
+  zap_i2list(*fsyms);
+  gather_symbols_in_topforms_acc(lst, r, f);
+  *rsyms = i2accum_to_i2list(r);
+  *fsyms = i2accum_to_i2list(f);
 }  /* gather_symbols_in_topforms */
 
 /*************
@@ -691,12 +718,12 @@ void gather_symbols_in_topforms(Plist lst, I2list *rsyms, I2list *fsyms)
 Ilist fsym_set_in_topforms(Plist lst)
 {
   Ilist p;
-  I2list rsyms = NULL;
-  I2list fsyms = NULL;
-  gather_symbols_in_topforms(lst, &rsyms, &fsyms);
-  p = multiset_to_set(fsyms);
-  zap_i2list(rsyms);
-  zap_i2list(fsyms);
+  I2accum rsyms = get_i2accum();
+  I2accum fsyms = get_i2accum();
+  gather_symbols_in_topforms_acc(lst, rsyms, fsyms);
+  p = i2accum_to_set(fsyms);
+  zap_i2accum(rsyms);
+  zap_i2accum(fsyms);
   return p;
 }  /* fsym_set_in_topforms */
 
@@ -713,12 +740,12 @@ Ilist fsym_set_in_topforms(Plist lst)
 Ilist rsym_set_in_topforms(Plist lst)
 {
   Ilist p;
-  I2list rsyms = NULL;
-  I2list fsyms = NULL;
-  gather_symbols_in_topforms(lst, &rsyms, &fsyms);
-  p = multiset_to_set(rsyms);
-  zap_i2list(rsyms);
-  zap_i2list(fsyms);
+  I2accum rsyms = get_i2accum();
+  I2accum fsyms = get_i2accum();
+  gather_symbols_in_topforms_acc(lst, rsyms, fsyms);
+  p = i2accum_to_set(rsyms);
+  zap_i2accum(rsyms);
+  zap_i2accum(fsyms);
   return p;
 }  /* rsym_set_in_topforms */
 

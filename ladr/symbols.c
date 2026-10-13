@@ -2353,14 +2353,26 @@ void lex_order(Ilist fsyms, Ilist rsyms,
   Symbol *a = malloc(n * sizeof(void *));
   Ilist p;
   int i = 0;
+
+  /* multiset_occurrences() walks the multiset looking for one symbol, so
+     asking it once per symbol -- which is what this loop does -- is O(N^2) in
+     the number of symbols.  That is the same quadratic as building the
+     multiset in the first place (see multiset_add_n in glist.c), on the same
+     input, and fixing only the building half would have left the cost here.
+     Indexing the multiset once up front makes each lookup O(1). */
+  I2accum fsym_occ = i2list_to_i2accum(fsyms_multiset);
+  I2accum rsym_occ = i2list_to_i2accum(rsyms_multiset);
+
   for (p = fsyms; p; p = p->next, i++) {
     a[i] = lookup_by_id(p->i);
-    a[i]->occurrences = multiset_occurrences(fsyms_multiset, p->i);
+    a[i]->occurrences = i2accum_occurrences(fsym_occ, p->i);
   }
   for (p = rsyms; p; p = p->next, i++) {
     a[i] = lookup_by_id(p->i);
-    a[i]->occurrences = multiset_occurrences(rsyms_multiset, p->i);
+    a[i]->occurrences = i2accum_occurrences(rsym_occ, p->i);
   }
+  zap_i2accum(fsym_occ);
+  zap_i2accum(rsym_occ);
 
   add_skolems_to_preliminary_precedence();
 

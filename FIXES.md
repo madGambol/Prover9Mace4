@@ -42,6 +42,9 @@ defaults to `-std=gnu23`.
 | M8 | **Use-after-free in `zap_flatterm`, on every call** — the loop test re-reads `f->end` after the first iteration has freed `f`. Hit by the default prover9 run; invisible to valgrind and ASan because the block goes to an avail list, not to libc | `ladr/flatterm.c:152` | memory safety |
 | T3 | ...and that put a 4953-byte array in five frames, one of them recursive, cutting circular-`include()` depth from 40262 to 1651. The message is now measured with `snprintf(NULL,0,...)` and allocated to fit: no array, no truncation at any length, depth 87255 | `ladr/fatal.c`, 5 call sites | hardening |
 | PF1 | `String_buf` append is O(n²) | `ladr/strbuf.c` | performance |
+| PF2 | symbol multiset built and read back by linear search | `ladr/glist.c` | performance |
+| PF3 | `predicate_elimination` is O(R³); recomputes the whole candidate set per symbol | `provers.src/pred_elim.c` | performance (found, not fixed) |
+| PF4 | feature vector / FPA indexing is sized by the symbol table, not the clause | `ladr/features.c` | performance (found, not fixed) |
 | X1–X5 | All 4 installed helper scripts are unrunnable | `utilities/` | broken tooling |
 | L1 | `demod1` drops a term its callee may have freed | `ladr/demod.c:376` | latent, reported only |
 
@@ -1197,10 +1200,15 @@ which also rescans per character — the author's own comment there reads
 `/* Note that this is inefficient if there are many chunks in either sb. */`.
 This is on the proof-output and comment-handling paths.
 
-**Fix** — cache the tail chunk in `struct string_buf` (the struct is private to
-`strbuf.c`, and `get_cmem` zeroes it, so the new field needs no explicit
-initialisation), and walk the chunks directly in `sb_cat_copy`, still stopping
-at an embedded NUL as the original did.
+**Fix** — the first attempt cached the tail chunk in `struct string_buf`, which
+removed the quadratic append but left `sb_char` walking the chunk list from the
+head. Indexed *reading* is the other direction of the same defect and four
+places do it in a loop (the tokeniser in `parse.c`, `sb_remove_some_space()`,
+and both `sb_to_malloc_string()` and `sb_to_malloc_char_array()`), so the chunk
+list was replaced outright by a flat growable array that doubles through
+`get_mem`/`free_mem` — keeping the `max_megs` accounting the chunk allocator
+had. Both directions are O(1) per character now. `sb_cat_copy` still stops at
+an embedded NUL, as the original did.
 
 Measured with `test.src/strbuf_test.c` (new, run with `make -C test.src check`),
 400 000 `sb_append_char` calls:
@@ -1212,10 +1220,179 @@ Measured with `test.src/strbuf_test.c` (new, run with `make -C test.src check`),
 
 All 14 semantic assertions in that test pass identically before and after.
 
-The one cost: the extra pointer grows `struct string_buf` from 16 to 24 bytes.
-That shows up in Prover9's memory-usage report as `string_buf ( 24)` instead of
-`string_buf ( 16)`, and it is the reason for the only output differences the
-corpus A/B diff turned up (see below).
+**Cost: none, in the end.** The tail-cache version grew `struct string_buf`
+from 16 to 24 bytes, which moved the `max_megs` ceiling slightly and was the
+only output difference the first corpus A/B turned up. The flat array that
+replaced it holds a pointer and two ints — 16 bytes, exactly upstream's
+`struct chunk *first; int size;` — so `string_buf (  16)` is what the memory
+report prints on both sides, and that difference is gone. Verified by calling
+the library's own `fprint_strbuf_mem()` against each build.
+
+### PF2 — the symbol multiset is built, and read back, by linear search
+`ladr/glist.c`, `ladr/symbols.c`, `ladr/formula.c`, `ladr/topform.c`, `ladr/top_input.c`
+
+LADR represents "the multiset of symbols in the input" as an `I2list` of
+`(symnum, count)` pairs. Two independent quadratics ran over it, in the same
+phase of startup, on the same data.
+
+**Building it.** `multiset_add_n` searched the list for each symbol it added,
+and recursed while doing so:
+
+```c
+if (a == NULL)        { a = get_i2list(); a->i = i; a->j = n; }
+else if (a->i == i)     a->j += n;
+else                    a->next = multiset_add_n(a->next, i, n);
+```
+
+So *n* distinct symbols cost O(n²) comparisons and *n* stack frames.
+`multiset_to_set` recursed over the same list for the same reason.
+
+**Reading it back.** `lex_order` in `symbols.c` assigns the symbol precedence
+that the term ordering is derived from, and did it like this:
+
+```c
+for (p = fsyms; p; p = p->next, i++)
+  a[i]->occurrences = multiset_occurrences(fsyms_multiset, p->i);
+```
+
+`multiset_occurrences` walks the multiset to find one symbol. Once per symbol,
+over every symbol, is the same O(n²) again — so fixing only the building half
+would have left startup quadratic.
+
+**Why it matters here.** This is unbounded in the size of the input. It is
+irrelevant for the multiset of *variables* in a clause, which `MAX_VARS` caps
+at 100, and it is exactly the wrong shape for a knowledge base: an operation
+that is free at 100 symbols and fatal at 250,000. `Axioms/CSR003+2.ax` alone
+has 14,265 symbols.
+
+**Fix** — `glist.c` gains `I2accum`: the same multiset-of-ints abstraction
+backed by an open-addressed hash table, O(1) amortised insert and O(1) lookup.
+The recursive gather routines in `formula.c` and `topform.c` now thread an
+`I2accum`; the public entry points keep their `I2list *` signatures and convert
+once on the way in and once on the way out, so **no caller had to change**.
+"Once" is the whole of the design: a wrapper placed inside the per-formula loop
+would convert *n* times and restore the quadratic, which is why
+`gather_symbols_in_formulas` wraps the loop rather than the formula.
+`input_symbols` in `top_input.c` and the four `*_set_in_*` extractors use the
+accumulator directly, and `lex_order` indexes the multiset once instead of
+searching it per symbol. `multiset_add_n` and `multiset_to_set` are iterative
+now, which removes the stack-depth hazard from the small-multiset interface
+they remain.
+
+**First-seen ordering is preserved exactly** — by the rewritten
+`multiset_add_n`, which appends at the tail where the recursion used to, and by
+`i2accum_to_i2list`, which walks an append-only key array. This is the part
+worth being careful about: symbol precedence comes from these lists, precedence
+fixes the term ordering, the term ordering decides which equations are used as
+rewrite rules. A multiset in a different order would silently change every
+proof the prover finds. `test.src/multiset_test.c` asserts the two
+implementations agree element for element *and in order*.
+
+Measured against the library directly:
+
+| | `multiset_to_set`, 500 000 elements | `multiset_add` × 64 000 distinct |
+| --- | --- | --- |
+| before | **SIGSEGV** (stack overflow) | 7.59 s |
+| after | returns, 0.0 s | 3.33 s |
+
+The second column is the small-multiset interface, still a linear search by
+design and merely no longer recursive; the hash accumulator is what the
+unbounded paths use, and it inserts 200 000 distinct keys in 8 ms and reads
+them back in 3 ms.
+
+**What this is *not* worth, end to end.** Profiling the fixed build on an input
+with 6 000 distinct symbols puts `i2accum_add_n` at **0.12%** of the run: the
+multiset is off the profile. Prover9 startup at that scale is still dominated
+by two *other* pieces of superlinear work, found while measuring this one and
+recorded below as PF3 and PF4. With `predicate_elim` cleared, so that PF3 is
+out of the way, removing the multiset quadratic is worth 1.1x to 1.3x:
+
+| symbols | before | after |
+| --- | --- | --- |
+| 2 000 | 0.27 s | 0.23 s |
+| 4 000 | 1.27 s | 1.06 s |
+| 8 000 | 5.81 s | 4.67 s |
+| 16 000 | 25.90 s | 19.48 s |
+
+That is the honest figure for this change. The crash it removes, and the
+abstraction it introduces, are worth more than the ratio: PF3's fix needs the
+same accumulator.
+
+### PF3 — `predicate_elimination` is O(R³) in the number of relation symbols
+`provers.src/pred_elim.c` — **found but not yet fixed**
+
+`predicate_elimination` is on by default (`auto_setup` implies
+`predicate_elim`) and runs whenever `usable` is empty, which is the ordinary
+case for a file of axioms. Its driver is:
+
+```c
+Ilist syms = eliminable_relations(clauses2, equality);
+while (syms) {
+  clauses2 = elim_relation(syms->i, clauses2, disabled, echo);
+  zap_ilist(syms);                                 /* discards the rest */
+  syms = eliminable_relations(clauses2, equality);  /* recompute everything */
+}
+```
+
+Its own comment says what it does: *"use first symbol, discard rest, get new
+list"*. One symbol is eliminated per round and the whole candidate set is then
+recomputed — and each recomputation calls `eliminable_relation()` once per
+relation symbol, with each of those calls scanning every clause and every
+literal. So R rounds × R symbols × L literals.
+
+Recomputation is not gratuitous: eliminating one relation can make another
+eliminable or stop it being so. But the *inner* quadratic is pure waste. What
+`eliminable_relation()` decides, per symbol, is "no clause contains more than
+one occurrence, and (under equality) no negative occurrence has non-distinct
+variable arguments" — and a single pass over all clauses can decide that for
+every symbol at once, which is O(L) instead of O(R·L), with identical results.
+That turns O(R²·L) per round into O(L). `I2accum` from PF2 is the structure for
+it.
+
+Measured, 3 000 predicates, gprof on the fixed build:
+
+```
+ 37.58%  eliminable_relations        3001 calls
+ 22.42%  plist_append             9000012 calls
+ 15.31%  predicate_elimination          1 call   (82.33 s cumulative)
+ 11.26%  ilist_append             4501500 calls
+  4.45%  plist_cat              209533708 calls
+  0.12%  i2accum_add_n            9015000 calls
+```
+
+3 001 calls to `eliminable_relations` for 3 000 predicates is one round per
+symbol, exactly as the loop implies. In wall-clock terms, at 4 000 distinct
+symbols, startup takes 68.58 s with `predicate_elim` on and 1.27 s with it
+cleared — a factor of 54 on the same input.
+
+### PF4 — the feature-vector and FPA indexing path is quadratic
+`ladr/features.c`, `ladr/fpa*.c` — **found but not yet fixed**
+
+With `predicate_elim` cleared, what is left still quadruples for each doubling
+of the symbol count. gprof at 8 000 symbols:
+
+```
+ 23.59%  lookup_by_id           384808273 calls
+  9.45%  get_mem                768496576 calls
+  9.42%  rev_app_ilist              24000 calls
+  6.67%  fpa_trie_member_insert     16000 calls
+  5.40%  ilist_prepend          768032000 calls
+  4.02%  features                   16000 calls
+```
+
+768 million `Ilist` allocate/prepend/free triples for 8 000 clauses is about
+96 000 per clause, and 384 million `lookup_by_id` calls is about 48 000 per
+clause — both proportional to the number of distinct symbols, which is the
+quadratic. `rev_app_ilist` at 24 000 calls but 9.4% of self time is the same
+story: three calls per clause, each walking a list as long as the symbol table.
+The feature vector appears to be sized by the symbol count rather than by the
+clause, which is the wrong shape for a knowledge base with many predicates and
+few literals each.
+
+Neither PF3 nor PF4 is fixed here. They are recorded because they were found
+by measuring PF2, they are both on the input path that a large knowledge base
+takes, and PF3 in particular is a 54x effect that any work on scale should
+start with.
 
 ---
 
@@ -1351,10 +1528,10 @@ and would make the diff meaningless:
 ```
 
 The 32 "input-rejected" files are Mace4 puzzles and data files that Prover9
-declines identically on both sides. The 2 differences are
+declines identically on both sides. The 2 differences were
 `fof/ALG033+1.in` and `fof/ALG043+1.in`, both of which terminate by exhausting
-`max_megs`; they differ only in *where* the 400 MB ceiling falls, because
-`struct string_buf` is 8 bytes larger after PF1:
+`max_megs`; they differed only in *where* the 400 MB ceiling falls, because the
+first version of PF1 made `struct string_buf` 8 bytes larger:
 
 ```
 < string_buf (  16)          4903       4903          0
@@ -1363,7 +1540,18 @@ declines identically on both sides. The 2 differences are
 > formula (  48)         10474839    6982899    3491940
 ```
 
-Both reach the same conclusion (`exit (max_megs)`) and neither finds a proof.
+Both reached the same conclusion (`exit (max_megs)`) and neither found a proof.
+
+These same two problems are the whole of the behavioural difference from every
+later change as well, and for the same reason: they are the only two in the
+corpus that terminate *by running out of memory*, so any change in how much
+memory is used moves their stopping point. PF1's `struct string_buf` no longer
+contributes (the flat-array rewrite that superseded the tail cache is 16 bytes,
+the same as upstream), but PF2's `I2accum` allocates a hash table where the old
+code allocated list cells, so the pair differs again. Re-checked directly after
+PF2: both reach `exit (max_megs)` with 0 proofs on both sides. Nothing else in
+the 202 self-terminating runs differs at all — see "Determinism" below for why
+the other 12 are the clock and not the code.
 
 **3. Mace4, output diff over Mace4-appropriate inputs.** The shipped
 `mace4.examples` / `apps.examples` plus the upstream `mace4-misc` set — 18
@@ -1478,8 +1666,10 @@ Only where the old code's behaviour was undefined or absent:
   effect.
 - **D1** — truncated proof input now reports an error instead of hanging and
   then crashing.
-- **PF1** — 8 bytes more per `String_buf`, visible only in the memory report and
-  at a `max_megs` boundary, as item 2 above shows.
+- **PF1** — no behavioural change at all in the final version. The tail-cache
+  version cost 8 bytes per `String_buf`, visible in the memory report and at a
+  `max_megs` boundary; the flat array that replaced it is the same 16 bytes as
+  upstream.
 
 Everything else is a build fix, a buffer-size change on an error-reporting
 path, or a semantics-preserving rewrite.

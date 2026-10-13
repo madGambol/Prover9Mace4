@@ -130,7 +130,11 @@ void inherit_attributes(Topform par1, Context s1,
 			Topform par2, Context s2,
 			Topform child);
 
+void gather_symbols_in_topform_acc(Topform c, I2accum rsyms, I2accum fsyms);
+
 void gather_symbols_in_topform(Topform c, I2list *rsyms, I2list *fsyms);
+
+void gather_symbols_in_topforms_acc(Plist lst, I2accum rsyms, I2accum fsyms);
 
 void gather_symbols_in_topforms(Plist lst, I2list *rsyms, I2list *fsyms);
 

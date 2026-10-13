@@ -57,6 +57,10 @@ should be able to run one file and see it.
 | `t8-nand-nor.p` | `~&` and `~|` were never declared to the parser | lost problems |
 | `t5-quoted-formula-name.p` | the translator emitted files its own reader rejects | lost problems |
 | `m7-production-overflow.in` | `Op_codes` sized before the symbols that index it exist | memory safety |
+| `perf-fresh-symbol.sh` | `fresh_symbol()` restarted its search on every call | performance |
+| `perf-strbuf-indexing.sh` | `String_buf` indexing walked a chunk list from the head | performance |
+| `perf-multiset-symbols.sh` | the symbol multiset was built, and read back, by linear search | performance |
+| `arity-ceiling.sh` | `MAX_ARITY` was 255, and the field was narrower than the parameters | wrong results / lost problems |
 
 The remaining defects in `FIXES.md` -- the `zap_flatterm` use-after-free, the
 unbounded `fscanf`, the truncated filename messages and the rest -- are checked
@@ -64,6 +68,3 @@ mechanically by `../regress.sh` rather than demonstrated here. They are
 included there with the same kind of comment, but each needs either a
 sanitizer build, a poisoned allocator or a generated input, so there is no
 single file to read.
-| `perf-fresh-symbol.sh` | `fresh_symbol()` restarted its search on every call | performance |
-| `perf-strbuf-indexing.sh` | `String_buf` indexing walked a chunk list from the head | performance |
-| `arity-ceiling.sh` | `MAX_ARITY` was 255, and the field was narrower than the parameters | wrong results / lost problems |
