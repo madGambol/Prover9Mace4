@@ -97,6 +97,15 @@ timings and memory figures normalised:
   per object (137/137 compile lines, 77/77 library objects) rather than by
   looking for the ASan runtime in the binary, and the positive control reinstates
   a real defect *in the library* and confirms this build reports it.
+- **Checked against an independent oracle at scale.** Every TPTP problem
+  declares its own answer, so the library is a labelled test set. Across the
+  17,073 first-order problems in TPTP v9.3.1 that carry a decisive label —
+  34,146 runs — Prover9 and Mace4 committed **0 soundness violations**: no
+  proof of a problem declared satisfiable, no model of one declared
+  unsatisfiable. Two deliberately mislabelled problems were both caught, so
+  the check discriminates. Getting there required fixing a defect that made
+  `tptp_to_ladr` translate some problems into their opposite; see T4 in
+  `FIXES.md`.
 - Separately, 408 runs of `prooftrans`/`directproof` on deliberately malformed
   proof files, under the same sanitizers: 0 findings, against 96 for the
   unfixed build.
