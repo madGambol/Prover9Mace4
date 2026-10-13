@@ -216,18 +216,33 @@ BOOL logic_term(Term t)
  *
  *************/
 
+/* The gather routines below come in two forms.  The _acc form takes an
+   I2accum, the hash-backed multiset accumulator from glist.c, and is what the
+   recursion uses.  The form without the suffix keeps the original
+   "I2list *" signature and wraps the _acc form, so no caller has to change.
+
+   The distinction is not cosmetic.  Building an I2list multiset costs O(N^2)
+   in the number of distinct symbols, because multiset_add_n() searches the
+   list for each insertion; see the comment on that function for the
+   measurements.  An input file has no bound on its distinct symbols, so this
+   is the path that has to be O(N).  The wrapper converts once on the way in
+   and once on the way out, which is linear -- but only if it is called ONCE
+   per gather.  That is why gather_symbols_in_formulas() wraps the whole loop
+   rather than calling a wrapper per formula: a wrapper inside the loop would
+   convert N times and restore the quadratic. */
+
 static
-void gather_symbols_in_term(Term t, I2list *rsyms, I2list *fsyms)
+void gather_symbols_in_term(Term t, I2accum rsyms, I2accum fsyms)
 {
   if (!VARIABLE(t)) {
     if (is_term(t, "if", 3)) {
-      gather_symbols_in_formula_term(ARG(t,0), rsyms, fsyms);
+      gather_symbols_in_formula_term_acc(ARG(t,0), rsyms, fsyms);
       gather_symbols_in_term(ARG(t,1), rsyms, fsyms);
       gather_symbols_in_term(ARG(t,2), rsyms, fsyms);
     }
     else {
       int i;
-      *fsyms = multiset_add(*fsyms, SYMNUM(t));
+      i2accum_add(fsyms, SYMNUM(t));
       for (i = 0; i < ARITY(t); i++) {
 	gather_symbols_in_term(ARG(t,i), rsyms, fsyms);
       }
@@ -245,7 +260,7 @@ void gather_symbols_in_term(Term t, I2list *rsyms, I2list *fsyms)
 */
 
 /* PUBLIC */
-void gather_symbols_in_formula_term(Term t, I2list *rsyms, I2list *fsyms)
+void gather_symbols_in_formula_term_acc(Term t, I2accum rsyms, I2accum fsyms)
 {
   if (logic_term(t)) {
     int i;
@@ -253,15 +268,27 @@ void gather_symbols_in_formula_term(Term t, I2list *rsyms, I2list *fsyms)
       if (is_term(t, quant_sym(), 3) && i != 3)
 	;  /* skip quantifier and quantified variable */
       else
-	gather_symbols_in_formula_term(ARG(t,i), rsyms, fsyms);
+	gather_symbols_in_formula_term_acc(ARG(t,i), rsyms, fsyms);
     }
   }
   else {
     int i;
-    *rsyms = multiset_add(*rsyms, SYMNUM(t));
+    i2accum_add(rsyms, SYMNUM(t));
     for (i = 0; i < ARITY(t); i++)
       gather_symbols_in_term(ARG(t,i), rsyms, fsyms);
   }
+}  /* gather_symbols_in_formula_term_acc */
+
+/* PUBLIC */
+void gather_symbols_in_formula_term(Term t, I2list *rsyms, I2list *fsyms)
+{
+  I2accum r = i2list_to_i2accum(*rsyms);
+  I2accum f = i2list_to_i2accum(*fsyms);
+  zap_i2list(*rsyms);
+  zap_i2list(*fsyms);
+  gather_symbols_in_formula_term_acc(t, r, f);
+  *rsyms = i2accum_to_i2list(r);
+  *fsyms = i2accum_to_i2list(f);
 }  /* gather_symbols_in_formula_term */
 
 /*************
@@ -274,22 +301,34 @@ void gather_symbols_in_formula_term(Term t, I2list *rsyms, I2list *fsyms)
 */
 
 /* PUBLIC */
-void gather_symbols_in_formula(Formula f, I2list *rsyms, I2list *fsyms)
+void gather_symbols_in_formula_acc(Formula f, I2accum rsyms, I2accum fsyms)
 {
   if (f->type == ATOM_FORM) {
     if (is_term(f->atom, "if", 3)) {
-      gather_symbols_in_formula_term(ARG(f->atom,0), rsyms, fsyms);
-      gather_symbols_in_formula_term(ARG(f->atom,1), rsyms, fsyms);
-      gather_symbols_in_formula_term(ARG(f->atom,2), rsyms, fsyms);
+      gather_symbols_in_formula_term_acc(ARG(f->atom,0), rsyms, fsyms);
+      gather_symbols_in_formula_term_acc(ARG(f->atom,1), rsyms, fsyms);
+      gather_symbols_in_formula_term_acc(ARG(f->atom,2), rsyms, fsyms);
     }
     else
-      gather_symbols_in_formula_term(f->atom, rsyms, fsyms);
+      gather_symbols_in_formula_term_acc(f->atom, rsyms, fsyms);
   }
   else {
     int i;
     for (i = 0; i < f->arity; i++)
-      gather_symbols_in_formula(f->kids[i], rsyms, fsyms);
+      gather_symbols_in_formula_acc(f->kids[i], rsyms, fsyms);
   }
+}  /* gather_symbols_in_formula_acc */
+
+/* PUBLIC */
+void gather_symbols_in_formula(Formula f, I2list *rsyms, I2list *fsyms)
+{
+  I2accum r = i2list_to_i2accum(*rsyms);
+  I2accum fs = i2list_to_i2accum(*fsyms);
+  zap_i2list(*rsyms);
+  zap_i2list(*fsyms);
+  gather_symbols_in_formula_acc(f, r, fs);
+  *rsyms = i2accum_to_i2list(r);
+  *fsyms = i2accum_to_i2list(fs);
 }  /* gather_symbols_in_formula */
 
 /*************
@@ -302,11 +341,25 @@ void gather_symbols_in_formula(Formula f, I2list *rsyms, I2list *fsyms)
 */
 
 /* PUBLIC */
-void gather_symbols_in_formulas(Plist lst, I2list *rsyms, I2list *fsyms)
+void gather_symbols_in_formulas_acc(Plist lst, I2accum rsyms, I2accum fsyms)
 {
   Plist p;
   for (p = lst; p; p = p->next)
-    gather_symbols_in_formula(p->v, rsyms, fsyms);
+    gather_symbols_in_formula_acc(p->v, rsyms, fsyms);
+}  /* gather_symbols_in_formulas_acc */
+
+/* PUBLIC */
+void gather_symbols_in_formulas(Plist lst, I2list *rsyms, I2list *fsyms)
+{
+  /* One conversion for the whole list, not one per formula -- see the note
+     above gather_symbols_in_term(). */
+  I2accum r = i2list_to_i2accum(*rsyms);
+  I2accum f = i2list_to_i2accum(*fsyms);
+  zap_i2list(*rsyms);
+  zap_i2list(*fsyms);
+  gather_symbols_in_formulas_acc(lst, r, f);
+  *rsyms = i2accum_to_i2list(r);
+  *fsyms = i2accum_to_i2list(f);
 }  /* gather_symbols_in_formulas */
 
 /*************
@@ -322,12 +375,12 @@ void gather_symbols_in_formulas(Plist lst, I2list *rsyms, I2list *fsyms)
 Ilist function_symbols_in_formula(Formula f)
 {
   Ilist p;
-  I2list rsyms = NULL;
-  I2list fsyms = NULL;
-  gather_symbols_in_formula(f, &rsyms, &fsyms);
-  p = multiset_to_set(fsyms);
-  zap_i2list(rsyms);
-  zap_i2list(fsyms);
+  I2accum rsyms = get_i2accum();
+  I2accum fsyms = get_i2accum();
+  gather_symbols_in_formula_acc(f, rsyms, fsyms);
+  p = i2accum_to_set(fsyms);
+  zap_i2accum(rsyms);
+  zap_i2accum(fsyms);
   return p;
 }  /* function_symbols_in_formula */
 
@@ -344,12 +397,12 @@ Ilist function_symbols_in_formula(Formula f)
 Ilist relation_symbols_in_formula(Formula f)
 {
   Ilist p;
-  I2list rsyms = NULL;
-  I2list fsyms = NULL;
-  gather_symbols_in_formula(f, &rsyms, &fsyms);
-  p = multiset_to_set(rsyms);
-  zap_i2list(rsyms);
-  zap_i2list(fsyms);
+  I2accum rsyms = get_i2accum();
+  I2accum fsyms = get_i2accum();
+  gather_symbols_in_formula_acc(f, rsyms, fsyms);
+  p = i2accum_to_set(rsyms);
+  zap_i2accum(rsyms);
+  zap_i2accum(fsyms);
   return p;
 }  /* relation_symbols_in_formula */
 
