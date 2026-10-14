@@ -97,12 +97,12 @@ void index_fsub(Topform c, Indexop op, Clock clock)
   if (number_of_literals(c) == 1)
     lindex_update_first(Unit_index, c, op);
   else {
-    Ilist f = features(c);
+    I2list f = features(c);
     if (op == INSERT)
       di_tree_insert(f, Nonunit_index, c);
     else
       di_tree_delete(f, Nonunit_index, c);
-    zap_ilist(f);
+    zap_i2list(f);
   }
 #else
   int n = number_of_literals(c->literals);

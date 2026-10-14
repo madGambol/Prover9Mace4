@@ -12,7 +12,7 @@ CFLAGS = $(XFLAGS) -g  -O0 -Wall
 # CFLAGS = $(XFLAGS)  -Wall -pedantic
 
 PROGRAMS = avltest strbuf_test memory_test arity_test varnum_test bool_test \
-           multiset_test glist_test
+           multiset_test glist_test features_test
 
 all: ladr apps
 
@@ -40,6 +40,11 @@ strbuf_test: strbuf_test.o
 # Checks that a BOOL holds only TRUE or FALSE; microseconds.
 bool_test: bool_test.o
 	$(CC) $(CFLAGS) -o bool_test bool_test.o ../ladr/libladr.a -lm
+
+# Checks the sparse feature-vector index against a brute-force dense scan, in
+# both directions, on random data; under a second.
+features_test: features_test.o
+	$(CC) $(CFLAGS) -o features_test features_test.o ../ladr/libladr.a -lm
 
 # Checks the 40 list functions that used to recurse once per element: the
 # transcript must match what the recursive versions produced, byte for byte,
@@ -78,6 +83,7 @@ check: strbuf_test memory_test arity_test varnum_test bool_test multiset_test gl
 	./bool_test
 	./multiset_test
 	./glist_test
+	./features_test
 	./strbuf_test
 	./memory_test
 	./regress.sh
@@ -108,6 +114,7 @@ tier1: arity_test varnum_test bool_test multiset_test glist_test
 	./bool_test
 	./multiset_test
 	./glist_test
+	./features_test
 	./demos/run.sh
 	./tptp_semantics.sh
 
