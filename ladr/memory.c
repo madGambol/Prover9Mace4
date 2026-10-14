@@ -68,6 +68,22 @@ static int Malloc_calls = 0;   /* number of calls to malloc by palloc */
 
 static size_t Bytes_palloced = 0;
 
+/* Bytes allocated OUTSIDE palloc that must still count against max_megs.
+ *
+ * The ceiling is enforced below by counting palloc's own 20 MB mallocs, so
+ * anything allocated by another allocator is invisible to it.  That matters
+ * the moment a C++ container is used behind any of these interfaces: a
+ * std::unordered_map allocating through operator new would not be counted,
+ * assign(max_megs, n) would silently stop meaning what it says, and the two
+ * corpus problems that terminate BY exhausting the ceiling -- ALG033+1 and
+ * ALG043+1 -- would change behaviour for no stated reason.
+ *
+ * So external allocators charge here instead, through
+ * charge_external_mem()/discharge_external_mem(), and the check below counts
+ * those bytes alongside palloc's blocks.  See ladr/cxx_alloc.h. */
+
+static size_t Bytes_external = 0;
+
 /* These are char* rather than void* because palloc() does arithmetic on
    them.  Arithmetic on void* is a GCC extension (it treats void as having
    size 1), not standard C: a conforming compiler is entitled to reject
@@ -127,7 +143,9 @@ void *palloc(size_t n)
 	printf("palloc, n=%d\n", (int) n);
 	fatal_error("palloc, request too big; reset MALLOC_MEGS");
       }
-      else if (Max_megs_check && (Malloc_calls+1)*MALLOC_MEGS > Max_megs) {
+      else if (Max_megs_check &&
+	       (size_t) (Malloc_calls+1)*MALLOC_MEGS
+		 + Bytes_external / (1024 * 1024) > (size_t) Max_megs) {
 	if (Exit_proc)
 	  (*Exit_proc)();
 	else
@@ -306,6 +324,67 @@ int megs_malloced(void)
 {
   return Malloc_calls * MALLOC_MEGS;
 }  /* megs_malloced */
+
+/*************
+ *
+ *   charge_external_mem()
+ *
+ *************/
+
+/* DOCUMENTATION
+Charge n bytes allocated outside palloc against the max_megs ceiling, and
+enforce the ceiling if this crosses it.  Used by allocators that are not
+palloc -- see ladr/cxx_alloc.h -- so that assign(max_megs, n) keeps meaning
+what it says.
+*/
+
+/* PUBLIC */
+void charge_external_mem(size_t n)
+{
+  Bytes_external += n;
+  if (Max_megs_check &&
+      (size_t) Malloc_calls * MALLOC_MEGS
+	+ Bytes_external / (1024 * 1024) > (size_t) Max_megs) {
+    if (Exit_proc)
+      (*Exit_proc)();
+    else
+      fatal_error("charge_external_mem, Max_megs parameter exceeded");
+  }
+}  /* charge_external_mem */
+
+/*************
+ *
+ *   discharge_external_mem()
+ *
+ *************/
+
+/* DOCUMENTATION
+Release n bytes previously charged with charge_external_mem().
+*/
+
+/* PUBLIC */
+void discharge_external_mem(size_t n)
+{
+  /* Saturate rather than wrap: a mismatched pair is a bug, but a wrapped
+     size_t here would make the ceiling unreachable and hide it. */
+  Bytes_external = (Bytes_external >= n) ? Bytes_external - n : 0;
+}  /* discharge_external_mem */
+
+/*************
+ *
+ *   external_mem_bytes()
+ *
+ *************/
+
+/* DOCUMENTATION
+How many bytes are currently charged from outside palloc.
+*/
+
+/* PUBLIC */
+size_t external_mem_bytes(void)
+{
+  return Bytes_external;
+}  /* external_mem_bytes */
 
 /*************
  *
