@@ -50,7 +50,9 @@ defaults to `-std=gnu23`.
 | PF7 | `eq_defs()` accumulates dependents with `ilist_cat`, 1.07 billion cell visits | `provers.src/unfold.c` | performance |
 | PF8 | `collect_multiples()` compares every symbol name against every other | `ladr/symbols.c` | performance |
 | PF9 | appending to a list you are growing, 14 input-scaling sites | `ladr/glist.c` +10 | performance |
-| PF10 | discrimination-tree / FPA index construction, 78%% of what remains | `ladr/discrimb.c` | performance (found, not fixed) |
+| PF10 | discrimination index per-insert cost is the node's fan-out | `ladr/discrimb.c` | performance |
+| T9 | discrimination index key was a `short`; above 32,767 symbols the prover aborted | `ladr/discrim.h` | crash / lost problems |
+| CXX | two hand-rolled containers replaced by `unordered_map`/`vector` behind the same C interfaces | `ladr/i2accum_cxx.cpp` | maintainability |
 | X1–X5 | All 4 installed helper scripts are unrunnable | `utilities/` | broken tooling |
 | L1 | `demod1` drops a term its callee may have freed | `ladr/demod.c:376` | latent, reported only |
 
@@ -1775,8 +1777,79 @@ that the next loop written over the input does not reintroduce the quadratic.
 
 Behaviour: 0 differences over the 174 comparable corpus runs, A/A floor 0.
 
-### PF10 — the discrimination-tree and FPA index construction is quadratic
-`ladr/discrimb.c`, `ladr/fpa.c` — **found but not fixed**
+### T9 — the discrimination index truncated symbol numbers, and the prover aborted
+`ladr/discrim.h`
+
+`struct discrim` stored its key in a `short`. That field is overloaded, and
+which kind of key it holds depends on the sibling `type`:
+
+| `type` | holds | real bound |
+| --- | --- | --- |
+| `DVARIABLE` | a variable number, `VARNUM(t)` | `MAX_VARS` = 100 |
+| `DRIGID` | a **symbol** number, `SYMNUM(t)` | unbounded |
+| AC indexing (`discrimw.c`) | an argument count, `num_args` | `MAX_ARITY` = 65 534 |
+
+Two of the three outgrow a `short`. Symbol numbers come from an incrementing
+counter with no cap — `SYM_TAB_SIZE` is the width of the hash table, not a
+limit — and `MAX_ARITY` is 65 534, which does not fit in a `short` at all.
+That last one is this project's own doing: the arity ceiling was widened to
+65 534 without following the value through to here. Assigning an `int` symnum
+to a `short` truncates silently, and above 32 767 it goes **negative**: symnum
+40 000 reads back as −25 536.
+
+**It is not a slow degradation.** Insertion and retrieval both decide whether a
+node for a key exists by comparing `d->symbol != key`, and a truncated field
+never equals the untruncated local. So a term indexed under a high symbol is
+never found again — and the delete path then reaches
+
+```
+fatal_error("discrim_bind_delete, cannot find end")
+```
+
+and **the prover exits.** Measured rather than reasoned about:
+`test.src/discrim_test.c` creates enough symbols to cross the boundary, indexes
+a term under a symbol above it and asks for it back. It has to `fork()` to do
+so, because against the unfixed field the child is killed by the very defect it
+is reporting:
+
+```
+ok:   a term under a symbol BELOW 32767 round-trips through the index
+      detail: retrieve did not find the term that was just inserted
+FAIL: a term under a symbol ABOVE 32767 round-trips through the index
+```
+
+**Fix** — the field is `int32_t`. This costs nothing: there were already five
+bytes of padding after `short symbol; char type;`, so `struct discrim` is 24
+bytes either way, measured both ways. Signed rather than unsigned because all
+37 comparison sites test `d->symbol < key` against `int` locals.
+
+The named types added earlier are now defined over fixed-width bases too, so
+the width is stated rather than inherited from the platform — the same lesson
+as `-fshort-enums` truncating an enum-typed count:
+
+| type | was | is |
+| --- | --- | --- |
+| `ArityType` | `unsigned short` | `uint16_t` |
+| `SymNumType` | `int` | `int32_t` |
+| `VarNumType` | `int` | `int32_t` |
+| `VarCountType` | `unsigned short` | `uint16_t` |
+
+Behaviour: 0 differences over the 174 comparable corpus runs — no TPTP problem
+in the corpus has 32 767 symbols, which is exactly why this needed a written
+test rather than a sweep.
+
+One note on how nearly this was mis-reported. A first end-to-end comparison on
+a 40 000-symbol input showed `THEOREM PROVED` before the fix and
+`SEARCH FAILED` after, which reads as a serious regression. It was not: the
+input carried `assign(max_seconds, 60)` and the two runs landed on opposite
+sides of the prover's own clock limit on identical work — 60.7 s against
+61.2 s. Given room, both prove it. That is the rule from "Determinism" below
+being broken by the person who wrote it: never compare runs that stop on a
+clock.
+
+### PF10 — the discrimination index's per-insert cost is the node's fan-out
+`ladr/discrimb.c`, `ladr/discrim.c` — fixed for the discrimination tree;
+`ladr/fpa.c` has the same shape and is **not** fixed
 
 With all five of the above fixed, CSR040-10's startup profile is **78%** index
 construction and retrieval, and nothing else is above 5%:
@@ -1843,16 +1916,85 @@ change rather than a local one.
 `fpa_trie_member_insert` is also recursive once per path element, which is the
 PF5 shape; path lengths are term depths and so small, but it is on the list.
 
-This is the right place for the next piece of work on scale: bigger than PF9,
-smaller than PF4's sparse-vector change, and the last thing standing between
-this tree and a startup cost that grows with the input rather than with its
-square.
+**Where the cost actually is.** Instrumenting the insert on CSR040-10 gave
+105.9 million sibling steps in one run — and not where it looked:
 
-PF6 and PF10 are recorded rather than fixed. Both are on the input path that a
-large knowledge base takes, and every one of these was found by measuring
-something else — which is the argument for measuring before optimising, not
-after, and for re-measuring after every fix rather than reasoning about what
-must now be fastest.
+| depth | calls | sibling steps | per call |
+| --- | ---: | ---: | ---: |
+| 0 | 74 743 | 177 751 | 2.4 |
+| **1** | 178 776 | **48 014 769** | 269 |
+| **2** | 169 338 | **48 793 529** | 288 |
+
+91% is at depths 1 and 2 — the *arguments* of the top-level symbol, not the
+symbol itself. Indexing the root, which was the plan before measuring, would
+have bought almost nothing.
+
+**Fix.** A node's rigid children get a symbol-keyed index once there are 32 of
+them, and on an indexed node both halves become O(1): retrieval looks the
+symbol up, and insertion **appends** instead of splicing into sorted position.
+
+The appending is the part that matters, and the first attempt missed it.
+Indexing only the lookup gave 1.10x, because the misses were the entire
+remaining cost: 41 263 of them averaging ~1 836 steps, 75.8 million of the
+75.9 million that remained, since a miss still had to walk the list to find the
+insertion point. An ordered linked list cannot be built in better than O(n²)
+however cleverly the position is found, so **the ordering had to go** — and it
+could only go once retrieval stopped walking it. The two halves are coupled and
+cannot be shipped separately.
+
+Unsorted rigid children are safe because of how retrieval backtracks: it pushes
+`d->next` as alternatives only when a *variable* child matched, variables always
+precede rigid children and are never reordered, and on resume the loop exits at
+the first non-variable and goes straight to the symbol lookup. The parent is
+threaded through the `Flat2` frames as `alt_parent` so the index is reachable
+after a backtrack.
+
+| | CSR040-10 startup, five runs |
+| --- | --- |
+| before | 6.92, 6.75, 7.01, 6.77, 6.65 s |
+| after | 3.72, 3.80, 3.76, 4.01, 3.71 s |
+
+**1.8x**, and on a ladder of *n* clauses over 2*n* symbols with
+`predicate_elim` cleared: 2.66x at 8 000 symbols, 2.65x at 16 000, 2.00x at
+32 000. `struct discrim` goes from 24 to 32 bytes — the index pointer plus a
+saturating child count in what was padding — which on CSR040-10 is 287 641
+nodes, 6.7 MB to 9.0 MB.
+
+**What the corpus A/B caught, and tier2 did not.** Dropping the sorted order
+changes a data-structure *invariant*, and every reader has to be audited.
+Insert and retrieve were updated; two were missed, and **three corpus problems
+stopped being proved** — `SWC258+1`, `SET667+3` and `olsax2` went from
+`THEOREM PROVED` to no proof at all:
+
+- `discrim_bind_end()`, which the delete path uses to find a leaf, still did
+  `while (d1 && d1->symbol < sym) d1 = d1->next;`. On an unsorted list that
+  returns NULL for a term that *is* present.
+- the delete path never told the index a node had been freed, leaving a pointer
+  into freed memory that retrieval and insertion would both return.
+
+Tier2 passed throughout — 41 regression tests, 271 verified models,
+determinism, upstream's smoke tests, all green on a build that had lost three
+proofs. The 174-run corpus A/B is what found it, and that is the whole argument
+for running it before anything reaches `rc`. Both readers go through
+`discrim_child_find()` now and the A/B is back to its floor of 2 (the `max_megs`
+pair, both still `exit (max_megs)`).
+
+Every remaining reader was then audited: `discrim_bind_delete` unlinks by
+**pointer identity**, and `check_discrim_bind_tree`, `zap_discrim_tree`,
+`di_promote` and `discrim_child_removed` iterate the whole list, so none
+depends on order. `print_discrim_bind_tree` does, but `fprint_mindex` and
+`p_mindex` have no callers anywhere, so it is dead diagnostic code.
+
+**Not fixed:** `fpa_trie_member_insert` in `ladr/fpa.c` has the identical shape
+— its own comment says "Children are in increasing order" above a linear scan
+— and was 22.87% of the pre-fix profile. Left alone because the discrimination
+tree was the larger half and the same reader audit would have to be repeated
+there.
+
+PF6 is recorded rather than fixed, as is the FPA half of this one. Every one of
+these was found by measuring something else — which is the argument for
+measuring before optimising, not after, and for re-measuring after every fix
+rather than reasoning about what must now be fastest.
 
 ### Cumulative effect on a real knowledge-base-scale problem
 
@@ -1863,7 +2005,7 @@ together on `Problems/CSR/CSR040-10.p` — 5.7 MB of TPTP, 44 227 clauses and
 
 | build | startup |
 | --- | --- |
-| pristine upstream (plus only the build fixes) | 156.51 s |
+| pristine upstream (plus only the build fixes) | 157.53 s |
 | after PF2 (symbol multiset) | 152.44 s |
 | after PF5 (iterative list functions) | 127.11 s |
 | after PF3 (predicate elimination) | 114.09 s |
@@ -1871,14 +2013,25 @@ together on `Problems/CSR/CSR040-10.p` — 5.7 MB of TPTP, 44 227 clauses and
 | after PF4 part 2 (feature vector made sparse) | 31.81 s |
 | after PF7 (equational-definition dependents) | 15.54 s |
 | after PF8 (symbol-name arity check) | 9.07 s |
-| after PF9 (tail-append idiom, 14 sites) | **7.68 s** |
+| after PF9 (tail-append idiom, 14 sites) | 7.68 s |
+| after PF10 (discrimination-tree child index) | 3.91 s |
+| after the C++ containers and the two reader fixes | **3.80 s** |
 
-**21.9x overall**, and the shape matters more than the factor: every one of
-these fixes removed a cost proportional to the *vocabulary*, or to the amount
-already accumulated, rather than to the work actually being done — so the gap
-widens with the size of the knowledge base. What remains is PF10, the index
-construction itself, which is 78% of the profile and still quadratic in the
-vocabulary.
+**41x overall**, and the shape matters more than the factor: every one of these
+fixes removed a cost proportional to the *vocabulary*, or to the amount already
+accumulated, rather than to the work actually being done — so the gap widens
+with the size of the knowledge base.
+
+One caveat on the pristine figure. It was quoted as 168.17 s for most of this
+work and is 157.53 s re-measured, because the earlier runs shared the machine
+with a stray background process of this project's own making that had been
+spinning on one core for two days. One core of eighty is immaterial to a
+single-threaded run, but it is not nothing, and the honest figure is the one
+measured on an idle machine.
+
+What remains is not identified. A ladder of unit clauses still grows about 4.5x
+per doubling of the vocabulary above 60 000 symbols, so at least one quadratic
+is still in there.
 
 Note also that PF3's 106x on the synthetic ladder is 1.12x here, because most
 of this problem's predicates are not eliminable and the cubic loop barely runs.
@@ -2238,6 +2391,65 @@ Only where the old code's behaviour was undefined or absent:
 
 Everything else is a build fix, a buffer-size change on an error-reporting
 path, or a semantics-preserving rewrite.
+
+---
+
+## C++ containers behind the C interfaces
+
+Four hand-written containers accumulated during the work above: `I2accum`'s
+open-addressed hash table (PF2), the discrimination-tree child index (PF10),
+the name grouping inside `collect_multiples` (PF8), and a sorted-array merge in
+`arity_check`. Each is 80–150 lines doing what `unordered_map`, `vector` or
+`sort` does in one, and the cost is not speed — it is bug surface. The first
+version of the `collect_multiples` grouping contained a **fresh quadratic**,
+caught only by measuring it, and the first version of the PF10 index fixed the
+wrong half of the problem.
+
+Two of them are now standard-library containers behind byte-identical C
+interfaces. No caller changed and no header the callers use was edited.
+
+| was | is | where |
+| --- | --- | --- |
+| `I2accum`, 331 lines of probing, tombstones, load factors and rehash | `std::unordered_map` + an insertion-order `vector` | `ladr/i2accum_cxx.cpp` |
+| `lookup_by_id`, a hash plus a chain walk | `std::vector` indexed by symnum | `ladr/symtab_cxx.cpp` |
+
+**How.** One translation unit per container, compiled as C++, with `extern "C"`
+definitions matching the existing prototypes exactly. `Symbol` and `I2accum`
+were already opaque pointers, so C callers see no difference. The C++ standard
+library is linked wherever `libladr.a` is, via `LADRLIBS = -lstdc++`, rather
+than by changing `CC`. Every `extern "C"` body catches everything: an exception
+crossing into C is undefined behaviour, so `std::bad_alloc` becomes LADR's own
+`fatal_error`.
+
+`ladr/cxx_alloc.h` declares `LadrAlloc<T>`, which charges new
+`charge_external_mem()`/`discharge_external_mem()` hooks in `memory.c` so that
+container bytes count against `max_megs`; verified by `max_megs=20` exiting and
+`max_megs=500` completing on a 40 000-symbol input. (`max_megs` is a
+nice-to-have here rather than a requirement, but the allocator is 40 lines.)
+
+`By_id` stays, because the whole-table scans walk its buckets and their
+iteration **order** feeds symbol precedence and therefore the term ordering;
+converting them to symnum order would quietly change which equations become
+rewrite rules. `str_to_sn` registers each symbol in both.
+
+**It is not a speed win, and should not be presented as one.** CSR040-10
+startup, three runs each: 3.92/3.80/3.82 s before, 3.69/3.74/3.68 s after —
+**1.04x**, which is about all that was available, since `lookup_by_id` is 18
+million calls in a 3.8-second run.
+
+And one prediction was simply wrong. I expected `lookup_by_id` to degrade past
+50 000 symbols, because `hash_id()` is `abs(id) % 50000` and every bucket
+chains beyond that. Measured, it does not matter:
+
+| symbols | hand-rolled | C++ | ratio |
+| --- | --- | --- | --- |
+| 60 000 | 31.09 s | 31.08 s | 1.00x |
+| 120 000 | 141.50 s | 139.10 s | 1.01x |
+
+120 000 symbols over 50 000 buckets is an average chain of 2.4, and a
+2.4-element walk against an array index is not measurable. The honest case for
+this change is the 331 lines of hash table deleted and the pattern established,
+not the 4%.
 
 ---
 
