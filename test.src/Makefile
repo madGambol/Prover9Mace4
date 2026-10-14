@@ -84,6 +84,7 @@ check: strbuf_test memory_test arity_test varnum_test bool_test multiset_test gl
 	./multiset_test
 	./glist_test
 	./features_test
+	./arity_check_test.sh
 	./strbuf_test
 	./memory_test
 	./regress.sh
@@ -115,6 +116,7 @@ tier1: arity_test varnum_test bool_test multiset_test glist_test
 	./multiset_test
 	./glist_test
 	./features_test
+	./arity_check_test.sh
 	./demos/run.sh
 	./tptp_semantics.sh
 
