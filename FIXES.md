@@ -44,7 +44,7 @@ defaults to `-std=gnu23`.
 | PF1 | `String_buf` append is O(n²) | `ladr/strbuf.c` | performance |
 | PF2 | symbol multiset built and read back by linear search | `ladr/glist.c` | performance |
 | PF3 | `predicate_elimination` is O(R³); recomputes the whole candidate set per symbol | `provers.src/pred_elim.c` | performance |
-| PF4 | feature vector / FPA indexing is sized by the symbol table, not the clause | `ladr/features.c` | performance (found, not fixed) |
+| PF4 | feature vector is sized by the symbol table, not the clause | `ladr/features.c` | performance (partly fixed) |
 | PF5 | 40 list functions recursed once per element; 10 crash at 400,000 | `ladr/glist.c` | crash at scale |
 | PF6 | `logic_term()` compares connective NAMES, 161M `str_ident` calls | `ladr/formula.c` | performance (found, not fixed) |
 | X1–X5 | All 4 installed helper scripts are unrunnable | `utilities/` | broken tooling |
@@ -1428,8 +1428,8 @@ symbol, exactly as the loop implies. In wall-clock terms, at 4 000 distinct
 symbols, startup takes 68.58 s with `predicate_elim` on and 1.27 s with it
 cleared — a factor of 54 on the same input.
 
-### PF4 — the feature-vector and FPA indexing path is quadratic
-`ladr/features.c`, `ladr/fpa*.c` — **found but not yet fixed**
+### PF4 — the feature vector is sized by the symbol table, not the clause
+`ladr/features.c` — **partly fixed**
 
 With `predicate_elim` cleared, what is left still quadruples for each doubling
 of the symbol count. gprof at 8 000 symbols:
@@ -1445,12 +1445,42 @@ of the symbol count. gprof at 8 000 symbols:
 
 768 million `Ilist` allocate/prepend/free triples for 8 000 clauses is about
 96 000 per clause, and 384 million `lookup_by_id` calls is about 48 000 per
-clause — both proportional to the number of distinct symbols, which is the
-quadratic. `rev_app_ilist` at 24 000 calls but 9.4% of self time is the same
-story: three calls per clause, each walking a list as long as the symbol table.
-The feature vector appears to be sized by the symbol count rather than by the
-clause, which is the wrong shape for a knowledge base with many predicates and
-few literals each.
+clause — both proportional to the number of distinct symbols.
+
+`features()` is why, and it is explicit about it: the vector holds two entries
+for the clause, then **two entries for every relation symbol and four for every
+function symbol in the whole input**, for every clause. On a real TPTP problem
+— `Problems/CSR/CSR040-10.p`, 44 227 clauses and 7 161 distinct symbols after
+translation — that is about 28 600 entries per clause, each its own heap cell;
+37 537 calls to `features()` produced **3.3 billion** `get_ilist`/`get_mem`/
+`free_mem` cycles and **1.08 billion** `lookup_by_id` calls.
+
+**What is fixed.** Three costs inside `features()` that are not inherent to the
+design:
+
+1. The inner loop asked `function_symbol(p->i)` — a symbol-table lookup — once
+   per featured symbol *per clause*, to decide whether that symbol contributes
+   two entries or four. The answer does not depend on the clause, so
+   `init_features()` records it once in a `char` array now. That removes 821
+   million `get_symbol_type` calls and the bulk of the `lookup_by_id` calls.
+
+2. `Feature_symbols` was an `Ilist` of one-`int` cells walked once per clause.
+   It is a flat `int` array now, so the inner loop is a sequential scan rather
+   than 7 161 pointer dereferences per clause.
+
+3. The vector was built backwards with `ilist_prepend` and then reversed. It is
+   built forwards with a tail pointer — same cells, same order, no reversing
+   pass, which alone was 7.69 s of a 171 s run.
+
+The vector is identical entry for entry, which the corpus A/B confirms: 0
+differences over the 174 comparable runs.
+
+**What is not fixed.** The vector is still as long as the symbol table, so
+building it is still O(clauses × symbols), with one heap cell per entry.
+Making it sparse — entries only for the symbols a clause actually mentions —
+would make it O(clause size), but the FPA and feature indexing compare vectors
+positionally and expect a fixed length, so that is a design change rather than
+a local one. It is the largest remaining scaling limit on the input path.
 
 ### PF6 — `logic_term()` identifies connectives by comparing symbol names
 `ladr/formula.c` — **found but not fixed**
@@ -1471,9 +1501,33 @@ built, so caching them and comparing integers would remove essentially all of
 it. Left alone here because it touches the formula representation that
 everything else in the tree reads, and PF3 was the larger effect.
 
-PF4 and PF6 are recorded rather than fixed. Both are on the input path that a
-large knowledge base takes, and both were found by measuring something else —
-which is the argument for measuring before optimising, not after.
+PF6 is recorded rather than fixed, as is the remaining half of PF4. Both are on
+the input path that a large knowledge base takes, and both were found by
+measuring something else — which is the argument for measuring before
+optimising, not after.
+
+### Cumulative effect on a real knowledge-base-scale problem
+
+The synthetic ladders above isolate one defect each. This is all of them
+together on `Problems/CSR/CSR040-10.p` — 5.7 MB of TPTP, 44 227 clauses and
+7 161 distinct symbols after translation — timing Prover9 startup only
+(`max_given=0`, so no search):
+
+| build | startup |
+| --- | --- |
+| pristine upstream (plus only the build fixes) | 156.51 s |
+| after PF2 (symbol multiset) | 152.44 s |
+| after PF5 (iterative list functions) | 127.11 s |
+| after PF3 (predicate elimination) | 114.09 s |
+| after PF4 part 1 (feature vector) | **95.50 s** |
+
+1.64x overall, and the shape matters more than the factor: what remains is
+dominated by the part of PF4 that is still O(clauses × symbols), so the gap
+widens with the size of the knowledge base.
+
+Note also that PF3's 106x on the synthetic ladder is 1.12x here, because most
+of this problem's predicates are not eliminable and the cubic loop barely runs.
+A speedup measured on one input shape is a claim about that shape.
 
 ### PF5 — forty list functions recursed once per element
 `ladr/glist.c`
