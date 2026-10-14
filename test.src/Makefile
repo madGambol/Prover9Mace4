@@ -99,10 +99,40 @@ check: strbuf_test memory_test arity_test varnum_test bool_test multiset_test gl
 #
 # Deliberately NOT a sampled tier2: the whole of tier2 costs under three
 # minutes, so sampling it would trade a real chance of missing a regression
-# for about two minutes.  The expensive checks are a tier further out and are
-# not make targets because they need their own corpora -- the sanitizer sweep
-# (about 25 min), the valgrind sweep (about 40 min), and the TPTP oracle and
-# capability runs (hours).  Those belong at the merge-to-rc and release gates.
+# for about two minutes.
+#
+#   tier3  the memory-safety sweeps: AddressSanitizer + UBSan over the whole
+#          corpus, LADR's own poisoned allocator against an unpoisoned
+#          control, and a valgrind memcheck sample.  Tens of minutes.  Needs a
+#          corpus, so:  make tier3 CORPUS=/path/to/list-of-inputs
+#
+# tier3 used to be three procedures described in a comment rather than three
+# scripts, and the result was predictable: it was skipped for five consecutive
+# merges to rc and master, during work that rewrote forty list functions as
+# manual pointer surgery and changed the layout of struct di_tree.  A gate
+# that depends on remembering to run it is not a gate, so it is a target now.
+#
+# determinism.sh had the same problem in a smaller way: it was written, it
+# worked, and no target invoked it, so it ran once and then never again.  It
+# is in tier2 now, with a generated default set.  The rule is worth stating
+# plainly: a script in this directory that no target invokes is documentation,
+# not a check.  The whole audit is
+#
+#   for s in *.sh; do grep -q "$s" Makefile || echo "unwired: $s"; done
+#
+# (normalize_output.sh is the one legitimate exception -- it is a filter the
+# other scripts call, not a check of its own.)
+#
+# The three are not interchangeable.  ASan finds out-of-bounds access and
+# undefined behaviour; valgrind finds reads of never-written memory and says
+# where the value came from; and the poisoned allocator finds stale reads
+# through LADR's avail lists, which NEITHER of the others can see, because
+# free_mem() pushes a cell onto a free list instead of returning it to the
+# system and both tools therefore see a live arena.  That is how the
+# zap_flatterm use-after-free was caught after a clean ASan sweep.
+#
+# Still not make targets, because they need hours and their own data: the TPTP
+# oracle sweep and the capability runs.  Those belong at a release.
 #
 # tier2 also accepts BASELINE=<bin dir> and then checks that the defect tests
 # still FAIL there.  A test that passes against the unfixed code is not a
@@ -125,6 +155,7 @@ tier2: strbuf_test memory_test tier1
 	./memory_test
 	./regress.sh
 	./mace4_soundness.sh
+	./determinism.sh 3
 	cd .. && $(MAKE) test1 && $(MAKE) test2 && $(MAKE) test3
 	@if [ -n "$(BASELINE)" ]; then \
 	  echo "--- checking the defect tests still fail against $(BASELINE) ---"; \
@@ -136,6 +167,15 @@ tier2: strbuf_test memory_test tier1
 	    exit 1; \
 	  fi; \
 	fi
+
+tier3:
+	@if [ -z "$(CORPUS)" ]; then \
+	  echo "tier3 needs a corpus:  make tier3 CORPUS=/path/to/list-of-inputs"; \
+	  exit 2; \
+	fi
+	./sanitizer_sweep.sh "$(CORPUS)"
+	./poison_sweep.sh "$(CORPUS)"
+	./valgrind_sweep.sh "$(CORPUS)"
 
 demos:
 	./demos/run.sh
