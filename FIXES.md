@@ -1798,10 +1798,55 @@ it is still *quadratic in the vocabulary*: on a ladder of *n* unit clauses over
 is out of the picture, startup still grows 4.2x per doubling. The cost is
 inside each insert, not in the number of them.
 
-This is the same kind of problem as PF4 was — an index whose per-item cost
-scales with the vocabulary rather than with the item — and the same kind of
-answer is likely. It is the right place for the next piece of work on scale,
-and a deeper change than any of PF2, PF3, PF7, PF8 or PF9.
+**The mechanism, read off the source rather than guessed.** Both indexes store
+a node's children as a *sorted linked list of symbols* and find the right child
+by scanning it. `discrim_bind_insert_rec` in `ladr/discrimb.c`:
+
+```c
+while (d1 && d1->symbol < symbol) {
+  prev = d1;
+  d1 = d1->next;
+}
+```
+
+and `fpa_trie_member_insert` in `ladr/fpa.c`, whose own comment states the
+invariant:
+
+```c
+/* Find child node that matches first member of path;
+ * if it doesn't exist, create it. Children are in increasing order. */
+while (curr != NULL && curr->label < val) {
+  prev = curr;
+  curr = curr->next;
+}
+```
+
+So each insert costs O(fan-out) at every level it descends, and the fan-out at
+the top level **is the vocabulary** — every distinct symbol that can start a
+term is a child of the root. One insert per clause over a list as long as the
+symbol table is O(clauses × symbols), which is the 4.2x per doubling measured
+above. It is the same defect as PF2, PF3, PF4, PF7, PF8 and PF9: a linear scan
+over something sized by the vocabulary, performed once per fact. That is now
+seven of the ten.
+
+**What the fix would look like.** Indexing every node's children by symbol
+would be O(1) per level but costs memory at every node, and most nodes have a
+handful of children. The usual answer, and the one that fits here, is an
+adaptive node: keep the sorted list, and promote a node's children to a
+symnum-keyed table once the list grows past a threshold. The fan-out is
+concentrated near the root, so a small number of promoted nodes should capture
+most of the cost. Retrieval walks siblings in order and relies on variables
+sorting before rigid symbols, so the ordered list has to survive promotion
+rather than be replaced by it — which is the part that makes this a design
+change rather than a local one.
+
+`fpa_trie_member_insert` is also recursive once per path element, which is the
+PF5 shape; path lengths are term depths and so small, but it is on the list.
+
+This is the right place for the next piece of work on scale: bigger than PF9,
+smaller than PF4's sparse-vector change, and the last thing standing between
+this tree and a startup cost that grows with the input rather than with its
+square.
 
 PF6 and PF10 are recorded rather than fixed. Both are on the input path that a
 large knowledge base takes, and every one of these was found by measuring
@@ -2193,6 +2238,80 @@ Only where the old code's behaviour was undefined or absent:
 
 Everything else is a build fix, a buffer-size change on an error-reporting
 path, or a semantics-preserving rewrite.
+
+---
+
+## The gates, and the one that was a comment
+
+There are three tiers, and the third one did not exist as anything executable
+until after the work in PF2 through PF9 had already been merged.
+
+| tier | what it is | cost |
+| --- | --- | --- |
+| `make tier1` | 7 unit tests, 6 demonstrations, the 26-case translation matrix | ~2 s |
+| `make tier2` | tier1 + 41 regression tests, 271 re-verified models, determinism, `String_buf`, the allocation counter, upstream's test1/2/3, and the baseline discrimination gate | ~3 min |
+| `make tier3 CORPUS=…` | AddressSanitizer + UBSan over the corpus, LADR's poisoned allocator against an unpoisoned control, and a valgrind memcheck sample | ~15 min |
+
+**What went wrong.** tier3 was three procedures described in a Makefile
+*comment* saying they "belong at the merge-to-rc and release gates". They were
+not a target and not even scripts. They were consequently skipped for **five
+consecutive merges to rc and master** — across exactly the changes they exist
+to catch: forty list functions rewritten as manual `prev`/`next` splicing with
+explicit `free_ilist()` calls (PF5), `struct di_tree` changed from a union to
+separate fields (PF4), new `malloc`/`free` arrays (PF8), and new cell
+allocation paths (PF9). The transcript and corpus tests checked *semantics*;
+nothing checked memory safety.
+
+A gate that depends on remembering to run it is not a gate. All three are
+scripts now, and a target.
+
+`determinism.sh` had the same disease in a smaller form: written, working, and
+invoked by no target at all, so it ran once and then never again. The whole
+audit is one line, and it is in the Makefile comment:
+
+```sh
+for s in *.sh; do grep -q "$s" Makefile || echo "unwired: $s"; done
+```
+
+**The three are not interchangeable**, which is why all three run. ASan finds
+out-of-bounds access and undefined behaviour. valgrind finds reads of
+never-written memory and says where the value came from. And the poisoned
+allocator finds stale reads through LADR's own avail lists, which **neither of
+the others can see**: `free_mem()` pushes a cell onto a per-size free list for
+`get_mem()` to hand straight back, so a use-after-free inside LADR never
+touches memory either tool considers free. Both see a live arena and report
+nothing. That is how M8, the `zap_flatterm` use-after-free that fires on every
+call, was caught *after* a clean ASan sweep.
+
+**Two bugs in the gate itself, found by running it.** Worth recording, because
+both would have made it useless while appearing to work:
+
+- The instrumentation check required `-fsanitize` to appear *after* `-c` on the
+  compile line. It comes from `XFLAGS` and so appears before. The check
+  reported **0 of 137** and refused a fully instrumented build — fail-closed,
+  but it would have hidden the sweep behind a permanent false negative.
+- Both sweeps were written as serial `while read` loops. On an 80-core machine
+  that leaves 79 cores idle and turns 20 minutes of work into hours, and the
+  symptom is deceptive: `top` shows `prover9` at about 1.2% CPU, which reads as
+  a stall when the process is in fact pegged at 100% of its one core and 1.25%
+  is simply one core out of eighty. They fan out across every core now, capped
+  by available memory rather than by core count. Parallelism is safe because
+  the per-run budget is `ulimit -t`, CPU time, which means the same thing with
+  sixty runs in flight as with one — a wall-clock guard would not, having once
+  faked 38.9% of a sweep's "timeouts".
+
+**Result on the current tree** (master at the PF9 merge, all of PF2–PF9 in):
+
+| sweep | runs | result |
+| --- | --- | --- |
+| AddressSanitizer + UBSan | 336 prover/problem pairs | **0 reports** |
+| Poisoned allocator vs control | 336 pairs against both builds | **0 differ** |
+| valgrind memcheck, 1-in-4 sample | 84 pairs | **0 reports** |
+
+Instrumentation verified both ways before the sweep was believed: 137 of 137
+compile lines carried `-fsanitize`, and 77 of 77 members of `libladr.a`
+reference `__asan`. The poisoned build carried `-DPOISON_FREED_MEM` on 137
+compile lines and the control on 0.
 
 ---
 

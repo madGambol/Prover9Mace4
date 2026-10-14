@@ -62,8 +62,16 @@
 #   above.
 #
 # USAGE
+#   test.src/determinism.sh N
+#       Run the default set -- the shipped prover9.examples and mace4.examples
+#       -- N times each.  This is what `make tier2` runs, so the check is a
+#       gate rather than a procedure described in a comment.  (determinism.sh
+#       was NOT wired into any target for some time after it was written, which
+#       is exactly the failure the tier3 scripts were created to fix; see the
+#       tier comments in Makefile.)
+#
 #   test.src/determinism.sh N PROBLEM [PROBLEM...]
-#       Run each problem N times with ../bin/prover9 and ../bin/mace4 and
+#       Run each named problem N times with ../bin/prover9 and ../bin/mace4 and
 #       report whether all N normalised outputs agree.
 #
 #   test.src/determinism.sh -b OTHER_BIN_DIR N PROBLEM [PROBLEM...]
@@ -87,7 +95,59 @@ if [ "${1:-}" = "-b" ]; then
 fi
 
 n="${1:-3}"; shift || true
-[ $# -gt 0 ] || { echo "usage: $0 [-b OTHER_BIN_DIR] N PROBLEM..." >&2; exit 2; }
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+# With no problems named, use a generated set plus the examples the tarball
+# ships.  The generated ones are all SATISFIABLE and FINITELY SATURATING,
+# which is the shape that terminates for both provers without needing
+# prover-specific options: Mace4 finds a model, and Prover9 derives everything
+# derivable and then exhausts its set of support.  Both stop for a reason the
+# input determines, which is the only kind of run worth comparing.
+#
+# The shipped examples are kept as well, even though two of the three are
+# resource-limited for Prover9 and get skipped: group2.in and rw1.in are real
+# Mace4 searches, and x2.in is a real proof with hints.
+if [ $# -eq 0 ]; then
+  cat > "$tmp/d1.in" <<'EOF'
+formulas(sos).
+  p(a).
+  q(b).
+  p(x) -> r(x).
+  r(x) & q(y) -> s(x,y).
+end_of_list.
+EOF
+  cat > "$tmp/d2.in" <<'EOF'
+formulas(sos).
+  f(a) = b.
+  f(b) = a.
+  g(x) = f(f(x)).
+  p(a).
+end_of_list.
+EOF
+  cat > "$tmp/d3.in" <<'EOF'
+formulas(sos).
+  -big(x) | small(x).
+  big(c1).
+  big(c2).
+  small(x) -> tiny(x) | medium(x).
+end_of_list.
+EOF
+  cat > "$tmp/d4.in" <<'EOF'
+formulas(sos).
+  e(x,x).
+  e(x,y) -> e(y,x).
+  e(a,b).
+  e(b,c).
+end_of_list.
+EOF
+  set -- "$tmp/d1.in" "$tmp/d2.in" "$tmp/d3.in" "$tmp/d4.in" \
+         $(ls "$here/../prover9.examples"/*.in "$here/../mace4.examples"/*.in \
+             2>/dev/null)
+  echo "using 4 generated satisfiable sets plus the shipped examples;"
+  echo "pass paths to override"
+fi
 
 # A run that stops because a timer went off is not comparable: the cut lands
 # wherever the clock happened to land.  Detect that from the prover's own exit
@@ -102,9 +162,6 @@ self_terminating() {
   grep -qaE 'exit \(|Exiting|exit_code' "$1"
 }
 
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
-
 fail=0
 printf '%-9s %-26s %-18s %s\n' PROG PROBLEM VERDICT NOTE
 printf '%s\n' '---------------------------------------------------------------------------'
@@ -116,7 +173,10 @@ for prob in "$@"; do
     # ---- A/A: the same binary, n times.  This is the noise floor. ----
     hashes=""
     for i in $(seq 1 "$n"); do
-      ( ulimit -t 60; "$bin/$prog" -f "$prob" ) > "$tmp/raw" 2>&1
+      # The outer braces exist to discard this shell's own "Killed" notice for
+      # a run that hits the CPU limit.  Such a run is reported as SKIP below,
+      # so the notice is noise -- and noise in a gate hides real failures.
+      { ( ulimit -t 60; exec "$bin/$prog" -f "$prob" ) > "$tmp/raw" 2>&1 ; } 2>/dev/null
       "$norm" < "$tmp/raw" > "$tmp/run.$i"
       hashes="$hashes $(md5sum < "$tmp/run.$i" | cut -c1-10)"
     done
@@ -134,7 +194,7 @@ for prob in "$@"; do
 
     # ---- A/B: the other build, only where A/A was clean. ----
     if [ -n "$other" ] && [ "$verdict" = deterministic ] && [ -x "$other/$prog" ]; then
-      ( ulimit -t 60; "$other/$prog" -f "$prob" ) 2>&1 | "$norm" > "$tmp/other"
+      { ( ulimit -t 60; "$other/$prog" -f "$prob" ) 2>&1 | "$norm" > "$tmp/other" ; } 2>/dev/null
       if cmp -s "$tmp/run.1" "$tmp/other"; then
         note="$note; matches $other"
       else
