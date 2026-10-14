@@ -1,5 +1,8 @@
 # Prover9 and Mace4 — LADR-2009-11A, repaired for modern toolchains
 
+**Picking this up?** `STATUS.md` has the current state, how to gate a
+change, and what is outstanding. `FIXES.md` is the defect catalogue.
+
 This is William McCune's **LADR-2009-11A** release of Prover9 (a resolution/
 paramodulation theorem prover for first-order and equational logic) and Mace4
 (a finite-model searcher for the same input language), with the changes needed
