@@ -5,6 +5,11 @@ CC = gcc
 # XFLAGS can be specified on the command line (see XFLAGS below)
 
 CFLAGS = $(XFLAGS) -O -Wall
+
+# libladr.a contains one C++ translation unit (i2accum_cxx.cpp), so the C++
+# standard library has to be linked wherever libladr is linked.  -lstdc++
+# rather than linking with g++, so that CC and CFLAGS stay as they were.
+LADRLIBS = -lstdc++
 # CFLAGS = $(XFLAGS) -O6 -Wall
 # CFLAGS = $(XFLAGS) -g  -O -Wall
 # CFLAGS = $(XFLAGS) -g -O0 -Wall
@@ -64,25 +69,25 @@ prover:
 	$(MAKE) prover9
 
 prover9: prover9.o $(OBJECTS)
-	$(CC) $(CFLAGS) -o prover9 prover9.o $(OBJECTS) ../ladr/libladr.a -lm
+	$(CC) $(CFLAGS) -o prover9 prover9.o $(OBJECTS) ../ladr/libladr.a -lm $(LADRLIBS)
 
 fof-prover9: fof-prover9.o $(OBJECTS)
-	$(CC) $(CFLAGS) -o fof-prover9 fof-prover9.o $(OBJECTS) ../ladr/libladr.a -lm
+	$(CC) $(CFLAGS) -o fof-prover9 fof-prover9.o $(OBJECTS) ../ladr/libladr.a -lm $(LADRLIBS)
 
 ladr_to_tptp: ladr_to_tptp.o $(OBJECTS)
-	$(CC) $(CFLAGS) -o ladr_to_tptp ladr_to_tptp.o $(OBJECTS) ../ladr/libladr.a -lm
+	$(CC) $(CFLAGS) -o ladr_to_tptp ladr_to_tptp.o $(OBJECTS) ../ladr/libladr.a -lm $(LADRLIBS)
 
 tptp_to_ladr: tptp_to_ladr.o $(OBJECTS)
-	$(CC) $(CFLAGS) -o tptp_to_ladr tptp_to_ladr.o $(OBJECTS) ../ladr/libladr.a -lm
+	$(CC) $(CFLAGS) -o tptp_to_ladr tptp_to_ladr.o $(OBJECTS) ../ladr/libladr.a -lm $(LADRLIBS)
 
 autosketches4: autosketches4.o $(OBJECTS)
-	$(CC) $(CFLAGS) -o autosketches4 autosketches4.o $(OBJECTS) ../ladr/libladr.a -lm
+	$(CC) $(CFLAGS) -o autosketches4 autosketches4.o $(OBJECTS) ../ladr/libladr.a -lm $(LADRLIBS)
 
 newauto: newauto.o $(OBJECTS)
-	$(CC) $(CFLAGS) -o newauto newauto.o $(OBJECTS) ../ladr/libladr.a -lm
+	$(CC) $(CFLAGS) -o newauto newauto.o $(OBJECTS) ../ladr/libladr.a -lm $(LADRLIBS)
 
 newsax: newsax.o $(OBJECTS)
-	$(CC) $(CFLAGS) -o newsax newsax.o $(OBJECTS) ../ladr/libladr.a -lm
+	$(CC) $(CFLAGS) -o newsax newsax.o $(OBJECTS) ../ladr/libladr.a -lm $(LADRLIBS)
 
 cgrep: cgrep.o $(OBJECTS)
 	$(CC) $(CFLAGS) -o cgrep cgrep.o $(OBJECTS) ../ladr/libladr.a

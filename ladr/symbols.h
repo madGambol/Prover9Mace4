@@ -140,6 +140,18 @@ BOOL str_exists(char *str);
 
 int greatest_symnum(void);
 
+/* symnum -> Symbol.  Implemented in symtab_cxx.cpp as an index into a vector:
+   symnums are dense and sequential, so a hash was the wrong structure, and
+   hash_id()'s 50,000 buckets chained beyond that many symbols.  It was a
+   static function in symbols.c; it is declared here now because it lives in
+   another translation unit. */
+
+Symbol lookup_by_id(int symnum);
+
+void symtab_register(int symnum, Symbol s);
+
+void symtab_unregister(int symnum);
+
 char *sn_to_str(int symnum);
 
 BOOL is_symbol(int symnum, char *str, ArityType arity);

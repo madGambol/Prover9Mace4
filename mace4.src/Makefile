@@ -5,6 +5,11 @@ CC = gcc
 # XFLAGS can be specified on the command line (see XFLAGS below)
 
 CFLAGS = $(XFLAGS) -O -Wall
+
+# libladr.a contains one C++ translation unit (i2accum_cxx.cpp), so the C++
+# standard library has to be linked wherever libladr is linked.  -lstdc++
+# rather than linking with g++, so that CC and CFLAGS stay as they were.
+LADRLIBS = -lstdc++
 # CFLAGS = $(XFLAGS) -O6 -Wall
 # CFLAGS = $(XFLAGS) -g  -O -Wall
 # CFLAGS = $(XFLAGS) -g  -Wall
@@ -30,7 +35,7 @@ ladr:
 	$(MAKE) clean
 
 mace4: libmace4.a mace4.o $(OBJECTS)
-	$(CC) $(CFLAGS) -o mace4 mace4.o libmace4.a ../ladr/libladr.a -lm
+	$(CC) $(CFLAGS) -o mace4 mace4.o libmace4.a ../ladr/libladr.a -lm $(LADRLIBS)
 
 $(OBJECTS): estack.h syms.h ground.h propagate.h mstate.h msearch.h
 

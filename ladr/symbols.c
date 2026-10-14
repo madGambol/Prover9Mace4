@@ -496,17 +496,12 @@ unsigned hash_id(int id)
  *
  *************/
 
-static
-Symbol lookup_by_id(int symnum)
-{
-  Plist p;
-  for (p = By_id[hash_id(symnum)]; p; p = p->next) {
-    Symbol s = p->v;
-    if (s->symnum == symnum)
-      return s;
-  }
-  return NULL;
-}  /* lookup_by_id */
+/* lookup_by_id() lives in symtab_cxx.cpp now, as an index into a vector
+   rather than a hash plus a chain walk.  Symnums are dense and sequential
+   (new_symnum() is "Symbol_count++; return Symbol_count"), and hash_id() is
+   abs(id) % 50000, so from the 50,001st symbol every bucket chained.  It was
+   1,078,330,320 calls on one TPTP problem before the FIXES.md work and is
+   still 18,042,855 after it. */
 
 /*************
  *
@@ -560,6 +555,12 @@ int str_to_sn(char *str, ArityType arity)
       int hashval_sym = hash_sym(str, arity);
       By_sym[hashval_sym] = plist_prepend(By_sym[hashval_sym], s);
       By_id[hashval_id]   = plist_prepend(By_id[hashval_id], s);
+      /* and by index, which is what lookup_by_id() uses; see
+	 symtab_cxx.cpp.  By_id stays because the whole-table scans below
+	 walk its buckets, and their iteration ORDER feeds symbol precedence
+	 and therefore the term ordering -- converting them to symnum order
+	 would quietly change which equations become rewrite rules. */
+      symtab_register(s->symnum, s);
     }
   }
   return(s->symnum);

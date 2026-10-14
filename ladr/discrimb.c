@@ -30,6 +30,9 @@ struct flat2 {  /* for building a stack of states for backtracking */
   Term     t;
   Flat2    prev, next, last;
   Discrim  alternatives;
+  Discrim  alt_parent;   /* the node whose children `alternatives` is in, so
+			    that the child index can be consulted after a
+			    backtrack; see discrim_child_find() */
   int      bound;
   int      varnum;
   int      place_holder;
@@ -231,8 +234,8 @@ void p_discrim_bind_index(Discrim d)
 static
 Discrim discrim_bind_insert_rec(Term t, Discrim d)
 {
-  Discrim d1, d2, prev;
-  int symbol, i;
+  Discrim d1 = NULL, d2 = NULL, prev = NULL;
+  int symbol = 0, i = 0;
 
   if (VARIABLE(t)) {
     d1 = d->u.kids;
@@ -266,19 +269,45 @@ Discrim discrim_bind_insert_rec(Term t, Discrim d)
       prev = d1;
       d1 = d1->next;
     }
-    while (d1 && d1->symbol < symbol) {
-      prev = d1;
-      d1 = d1->next;
+
+    /* Two shapes here, and which one applies is the whole of this fix.
+ 
+       An INDEXED node: the lookup is O(1), and on a miss the new child is
+       APPENDED in O(1) rather than spliced into sorted position.  Appending is
+       what actually removes the quadratic -- an ordered linked list cannot be
+       built in better than O(n^2) however cleverly the position is found, so
+       the ordering had to go.  It can go because nothing walks these children
+       in order any more: retrieval looks the symbol up in the same index.
+ 
+       Any OTHER node: exactly the original code.  Its children stay sorted,
+       because retrieval still walks them. */
+
+    if (discrim_child_indexed(d)) {
+      d1 = discrim_child_find(d, d1, symbol);
+      if (d1 == NULL) {
+	d2 = get_discrim();
+	d2->type = DRIGID;
+	d2->symbol = symbol;
+	discrim_child_append(d, d2);   /* links it and indexes it */
+	d1 = d2;
+	d2 = NULL;                     /* already linked; do not link again */
+      }
     }
-    if (d1 == NULL || d1->symbol != symbol) {
-      d2 = get_discrim();
-      d2->type = DRIGID;
-      d2->symbol = symbol;
-      d2->next = d1;
-      d1 = d2;
+    else {
+      while (d1 && d1->symbol < symbol) {
+	prev = d1;
+	d1 = d1->next;
+      }
+      if (d1 == NULL || d1->symbol != symbol) {
+	d2 = get_discrim();
+	d2->type = DRIGID;
+	d2->symbol = symbol;
+	d2->next = d1;
+	d1 = d2;
+      }
+      else
+	d2 = NULL;  /* new node not required at this level */
     }
-    else
-      d2 = NULL;  /* new node not required at this level */
 
     for (i = 0; i < ARITY(t); i++)
       d1 = discrim_bind_insert_rec(ARG(t,i), d1);
@@ -288,6 +317,7 @@ Discrim discrim_bind_insert_rec(Term t, Discrim d)
 	d->u.kids = d2;
       else
 	prev->next = d2;
+      discrim_child_added(d, d2);
     }
 	    
     return d1;  /* d1 is leaf corresp. to end of input term */
@@ -365,8 +395,14 @@ Discrim discrim_bind_end(Term t, Discrim d, Plist *path_p)
     sym = SYMNUM(t);  /* arities fixed: handle both NAME and COMPLEX */
     while (d1 && DVAR(d1))  /* skip variables */
       d1 = d1->next;
-    while (d1 && d1->symbol < sym)
-      d1 = d1->next;
+
+    /* The index, not a walk.  This is NOT an optimisation here -- it is
+       required: on an indexed node the rigid children are no longer in
+       sorted order, so "while (d1 && d1->symbol < sym)" cannot find them and
+       this function would return NULL for a term that is present.  That is
+       how three corpus problems silently stopped being proved; see the note
+       on discrim_child_find() in discrim.c. */
+    d1 = discrim_child_find(d, d1, sym);
 
     if (d1 == NULL || d1->symbol != sym)
       return NULL;
@@ -436,6 +472,10 @@ void discrim_bind_delete(Term t, Discrim root, void *object)
 	parent->u.kids = d2->next;
       else
 	d3->next = d2->next;
+      /* Before freeing it: the parent's child index holds a pointer to this
+	 node, and leaving it there is a dangling pointer that retrieval and
+	 insertion would both happily return. */
+      discrim_child_removed(parent, d2);
       free_discrim(d2);
       end = parent;
     }
@@ -540,6 +580,7 @@ Plist discrim_bind_retrieve_leaf(Term t_in, Discrim root,
   Flat2 f, f1, f2, f_save;
   Term t = NULL;
   Discrim d = NULL;
+  Discrim parent = NULL;   /* the node whose children `d` is walking */
   int symbol = 0;
   int match = 0;
   int bound = 0;
@@ -550,6 +591,7 @@ Plist discrim_bind_retrieve_leaf(Term t_in, Discrim root,
   f_save = NULL;
 
   if (t != NULL) {  /* if first call */
+    parent = root;
     d = root->u.kids;
     if (d != NULL) {
       f = get_flat2();
@@ -581,6 +623,7 @@ Plist discrim_bind_retrieve_leaf(Term t_in, Discrim root,
 	  f->bound = 0;
 	}
 	d = f->alternatives;
+	parent = f->alt_parent;
 	f->alternatives = NULL;
 	status = GO;
       }
@@ -607,6 +650,7 @@ Plist discrim_bind_retrieve_leaf(Term t_in, Discrim root,
       if (match) {
 	/* push alternatives */
 	f->alternatives = d->next;
+	f->alt_parent = parent;
 	f->bound = bound;
 	f->varnum = symbol;
 	f = f->last;
@@ -615,8 +659,12 @@ Plist discrim_bind_retrieve_leaf(Term t_in, Discrim root,
 	status = BACKTRACK;
       else {
 	symbol = SYMNUM(f->t);
-	while (d && d->symbol < symbol)
-	  d = d->next;
+	/* O(1) on an indexed node, the original walk on every other.  `d` has
+	   already been advanced past the variable children; rigid children
+	   come after variables, so the node this finds is the one the walk
+	   would have reached.  `parent` is threaded through the Flat2 frames
+	   above precisely so that it is available here. */
+	d = discrim_child_find(parent, d, symbol);
 	if (!d || d->symbol != symbol)
 	  status = BACKTRACK;
 	else if (f->place_holder) {
@@ -649,6 +697,7 @@ Plist discrim_bind_retrieve_leaf(Term t_in, Discrim root,
       if (status == GO) {
 	if (f->next) {
 	  f = f->next;
+	  parent = d;
 	  d = d->u.kids;
 	}
 	else
