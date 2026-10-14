@@ -84,7 +84,7 @@ void mace4_sig_handler(int condition)
 Plist process_distinct_terms(Plist distinct)
 {
   Plist p;
-  Plist forms = NULL;
+  Plist forms = NULL, forms_tail = NULL;
   for (p = distinct; p; p = p->next) {
     Term list = p->v;
     if (!proper_listterm(list))
@@ -100,7 +100,7 @@ Plist process_distinct_terms(Plist distinct)
 								copy_term(b)));
 	Formula f = term_to_formula(neq);
 	zap_term(neq);
-	forms = plist_append(forms, f);
+	forms = plist_tail_append(forms, &forms_tail, f);
 	rest = ARG(rest, 1);
       }
       list = ARG(list, 1);

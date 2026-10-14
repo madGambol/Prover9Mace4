@@ -722,11 +722,11 @@ Return the intersection of Plist p of clauses and Clist c of clauses.
 Plist clauses_in_clist(Plist p, Clist l)
 {
   Plist q;
-  Plist result = NULL;
+  Plist result = NULL, tail = NULL;
   for (q = p; q; q = q->next) {
     Topform c = q->v;
     if (clist_member(c, l))
-      result = plist_append(result, c);
+      result = plist_tail_append(result, &tail, c);
   }
   return result;
 }  /* clauses_in_clist */
