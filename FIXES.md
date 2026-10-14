@@ -48,7 +48,7 @@ defaults to `-std=gnu23`.
 | PF5 | 40 list functions recursed once per element; 10 crash at 400,000 | `ladr/glist.c` | crash at scale |
 | PF6 | `logic_term()` compares connective NAMES, 161M `str_ident` calls | `ladr/formula.c` | performance (found, not fixed) |
 | PF7 | `eq_defs()` accumulates dependents with `ilist_cat`, 1.07 billion cell visits | `provers.src/unfold.c` | performance |
-| PF8 | `collect_multiples()` compares every symbol name against every other | `ladr/symbols.c` | performance (found, not fixed) |
+| PF8 | `collect_multiples()` compares every symbol name against every other | `ladr/symbols.c` | performance |
 | PF9 | `nonneg_clauses()` appends to the list it is growing | `provers.src/utilities.c` | performance (found, not fixed) |
 | X1–X5 | All 4 installed helper scripts are unrunnable | `utilities/` | broken tooling |
 | L1 | `demod1` drops a term its callee may have freed | `ladr/demod.c:376` | latent, reported only |
@@ -1646,7 +1646,7 @@ floor of 0. 8 of those runs genuinely unfold definitions and 91 of 105 run
 `eq_defs` over every clause, so the path is exercised.
 
 ### PF8 — `collect_multiples()` compares every symbol name against every other
-`ladr/symbols.c` — **found but not fixed**
+`ladr/symbols.c`
 
 `arity_check()`, which runs over the whole input to report symbols used with
 more than one arity, is:
@@ -1661,11 +1661,49 @@ for (p1 = syms; p1; p1 = p1->next) {
 }
 ```
 
-An explicit all-pairs string comparison over every symbol in the input. On
-CSR040-10 that is **239 225 001** of the 263 958 220 `str_ident` calls in the
-profile, and it is what made the first attempt at the PF7 demo unmeasurable.
-Grouping by name — sorting, or a hash keyed on the string — makes it O(n log n)
-or O(n) and reports exactly the same set.
+An explicit all-pairs string comparison over every symbol in the input, to
+answer a question that is almost always "nothing wrong". On CSR040-10 that is
+**239 225 001** of the 263 958 220 `str_ident` calls in the profile, and it is
+what made the first attempt at the PF7 demo unmeasurable — a quadratic in the
+vocabulary does not only cost time, it hides whatever else you are trying to
+measure.
+
+**Fix** — group by name instead of comparing pairs: build an array of
+(name, symnum, position), sort by name, read off the runs of two or more.
+O(n log n) string comparisons.
+
+**The output order had to be preserved exactly, and it is not an order anyone
+would guess.** The caller in `top_input.c` turns this list straight into a
+`fatal_input_error` naming the symbols in list order, so a different order is a
+different error message. The pairwise loop produced: groups ordered by where
+each group's *first* member appears, members within a group in input order, and
+the whole thing reversed because each symbol was added with `ilist_prepend`.
+`test.src/arity_check_test.sh` pins the exact strings — and it has to, because
+the corpus cannot: this is a fatal error on malformed input, so no well-formed
+problem reaches it. The test passes identically against the all-pairs build,
+which is what makes it evidence about the old behaviour rather than an
+assertion about the new.
+
+Measured, startup on CSR040-10, three runs each:
+
+| | |
+| --- | --- |
+| before | 15.46, 15.90, 16.48 s |
+| after | 9.26, 8.94, 9.00 s |
+
+**1.75x.** On a ladder of *n* distinct symbols with nothing duplicated — the
+ordinary case, where all the work yields no answer — 1.9x at 8 000, 1.9x at
+16 000, 2.0x at 32 000, 2.7x at 64 000. On input that does trigger the error,
+*n* names each used with two arities so that there are *n* groups: 7.0x at
+2 000, 9.8x at 4 000, **20.8x** at 8 000, with the before column quadrupling
+per doubling and the after roughly doubling.
+
+One note on the fix itself, since measurement caught it: the first version
+looked up each group by scanning the sorted array for its first position, which
+is a scan per group — the same quadratic in a new place. Recording each run's
+start index alongside its position removes it. The many-groups ladder above is
+what exposed that, and `arity_check_test.sh` now carries a four-group case to
+keep it exposed.
 
 ### PF9 — `nonneg_clauses()` appends to a list it is growing
 `provers.src/utilities.c` — **found but not fixed**
@@ -1674,8 +1712,8 @@ or O(n) and reports exactly the same set.
 — and walks to the tail each time, so it is quadratic in the clause count: 8%
 of what remains on CSR040-10. The same tail-pointer fix as PF7.
 
-PF6, PF8 and PF9 are recorded rather than fixed. All are on the input path that
-a large knowledge base takes, and every one of them was found by measuring
+PF6 and PF9 are recorded rather than fixed. Both are on the input path that a
+large knowledge base takes, and every one of these was found by measuring
 something else — which is the argument for measuring before optimising, not
 after, and for re-measuring after every fix rather than reasoning about what
 must now be fastest.
@@ -1695,13 +1733,14 @@ together on `Problems/CSR/CSR040-10.p` — 5.7 MB of TPTP, 44 227 clauses and
 | after PF3 (predicate elimination) | 114.09 s |
 | after PF4 part 1 (feature vector built cheaply) | 95.50 s |
 | after PF4 part 2 (feature vector made sparse) | 31.81 s |
-| after PF7 (equational-definition dependents) | **15.54 s** |
+| after PF7 (equational-definition dependents) | 15.54 s |
+| after PF8 (symbol-name arity check) | **9.07 s** |
 
-**10.8x overall**, and the shape matters more than the factor: every one of
+**18.5x overall**, and the shape matters more than the factor: every one of
 these fixes removed a cost proportional to the *vocabulary*, or to the amount
 already accumulated, rather than to the work actually being done — so the gap
-widens with the size of the knowledge base. What remains is dominated by PF8
-and PF9.
+widens with the size of the knowledge base. What remains is dominated by PF9
+and by the discrimination-index construction.
 
 Note also that PF3's 106x on the synthetic ladder is 1.12x here, because most
 of this problem's predicates are not eliminable and the cubic loop barely runs.
