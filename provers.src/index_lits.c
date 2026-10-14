@@ -65,8 +65,7 @@ void destroy_literals_index(void)
   lindex_destroy(Unit_fpa_idx);       Unit_fpa_idx = NULL;
   lindex_destroy(Nonunit_fpa_idx);    Nonunit_fpa_idx = NULL;
   lindex_destroy(Unit_discrim_idx);   Unit_discrim_idx = NULL;
-  zap_di_tree(Nonunit_features_idx,
-	      feature_length());      Nonunit_features_idx = NULL;
+  zap_di_tree(Nonunit_features_idx);  Nonunit_features_idx = NULL;
 }  /* lits_destroy_index */
 
 /*************
@@ -89,12 +88,12 @@ void index_literals(Topform c, Indexop op, Clock clock, BOOL no_fapl)
   if (unit)
     lindex_update(Unit_discrim_idx, c, op);
   else {
-    Ilist f = features(c->literals);
+    I2list f = features(c->literals);
     if (op == INSERT)
       di_tree_insert(f, Nonunit_features_idx, c);
     else
       di_tree_delete(f, Nonunit_features_idx, c);
-    zap_ilist(f);
+    zap_i2list(f);
   }
   clock_stop(clock);
 }  /* index_literals */

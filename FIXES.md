@@ -44,9 +44,10 @@ defaults to `-std=gnu23`.
 | PF1 | `String_buf` append is O(n²) | `ladr/strbuf.c` | performance |
 | PF2 | symbol multiset built and read back by linear search | `ladr/glist.c` | performance |
 | PF3 | `predicate_elimination` is O(R³); recomputes the whole candidate set per symbol | `provers.src/pred_elim.c` | performance |
-| PF4 | feature vector is sized by the symbol table, not the clause | `ladr/features.c` | performance (partly fixed) |
+| PF4 | feature vector is sized by the symbol table, not the clause | `ladr/features.c` | performance / capability |
 | PF5 | 40 list functions recursed once per element; 10 crash at 400,000 | `ladr/glist.c` | crash at scale |
 | PF6 | `logic_term()` compares connective NAMES, 161M `str_ident` calls | `ladr/formula.c` | performance (found, not fixed) |
+| PF7 | `eq_defs()` accumulates with `ilist_cat`; 51%% of what remains | `provers.src/unfold.c` | performance (found, not fixed) |
 | X1–X5 | All 4 installed helper scripts are unrunnable | `utilities/` | broken tooling |
 | L1 | `demod1` drops a term its callee may have freed | `ladr/demod.c:376` | latent, reported only |
 
@@ -1429,7 +1430,7 @@ symbols, startup takes 68.58 s with `predicate_elim` on and 1.27 s with it
 cleared — a factor of 54 on the same input.
 
 ### PF4 — the feature vector is sized by the symbol table, not the clause
-`ladr/features.c` — **partly fixed**
+`ladr/features.c`, `ladr/di_tree.c`
 
 With `predicate_elim` cleared, what is left still quadruples for each doubling
 of the symbol count. gprof at 8 000 symbols:
@@ -1475,12 +1476,83 @@ design:
 The vector is identical entry for entry, which the corpus A/B confirms: 0
 differences over the 174 comparable runs.
 
-**What is not fixed.** The vector is still as long as the symbol table, so
-building it is still O(clauses × symbols), with one heap cell per entry.
-Making it sparse — entries only for the symbols a clause actually mentions —
-would make it O(clause size), but the FPA and feature indexing compare vectors
-positionally and expect a fixed length, so that is a design change rather than
-a local one. It is the largest remaining scaling limit on the input path.
+**And then the shape itself.** The vector now holds only its non-zero entries,
+as (position, value) pairs in increasing position order. A clause mentioning
+*k* symbols has at most 2 + 4*k* pairs instead of 2 + 4*R*.
+
+What makes this exact rather than approximate: every entry is non-negative and
+an absent position means zero, so
+
+> feature(C) ≤ feature(D) componentwise
+>  iff  for every position *p* where C is non-zero, C[*p*] ≤ D[*p*]
+
+because a position where C is zero constrains nothing. The index therefore
+retrieves **the same set of clauses**, which is the whole requirement — the
+filter is allowed to over-approximate subsumption, that being its job, but if
+it retrieved a different set then different subsumption checks would run.
+
+`di_tree.c` changes with it. Nodes used to be identified by depth alone,
+because depth *was* the position; they carry an explicit position now, so a
+path is as long as the clause is wide rather than as long as the symbol table.
+And `data` and `kids` are no longer a union: sparse vectors have different
+lengths, so one clause's path can end where another's continues. The two
+traversals are written once, as walks that call back with the data at each node
+they accept, so that `di_tree_data_le`/`di_tree_data_ge` — the filter alone,
+which `test.src/features_test.c` checks against a brute-force dense scan — use
+the same code the provers do.
+
+**Measured.** Startup on CSR040-10:
+
+| build | startup |
+| --- | --- |
+| pristine upstream | 167.92 s |
+| dense feature vector | 97.55 s |
+| **sparse feature vector** | **31.81 s** |
+
+3.1x over the dense version, 5.3x over 2009. The feature vector is off the
+profile entirely afterwards.
+
+On a synthetic ladder of *n* non-unit clauses over 3*n* distinct symbols, with
+the cap raised to 12 000 MB so that both builds do the same work:
+
+| symbols | dense | sparse |
+| --- | --- | --- |
+| 3 000 | 142 MB, 6.24 s | 5 MB, 0.12 s |
+| 6 000 | 557 MB, 50.63 s | 7 MB, 0.47 s |
+| 12 000 | 2 211 MB, 490.40 s | 12 MB, 2.11 s |
+
+Each doubling costs the dense build about four times the time *and* four times
+the memory; the sparse build about twice the time and very little memory. At
+12 000 symbols that is 184x less memory and 232x less time.
+
+**It is a capability difference, not only a speed one.** At Prover9's shipped
+default of `max_megs=500` the dense build cannot finish indexing 2 000 such
+clauses — `exit (max_megs)` with 1 732 of 2 000 indexed — while the sparse
+build completes. A vocabulary of a few thousand symbols was enough to turn a
+completed index into a truncated one.
+
+**What changed in the output, and what did not.** The retrieved set is
+identical, so the same clauses are subsumed and the same proofs are found: on
+`quot-comm.in`, `Given`, `Generated`, `Kept`, `Forward_subsumed=1154` and
+`Back_subsumed=3` are all unchanged. Two things do differ, neither of them a
+result:
+
+- The filter enumerates candidates in a different order, so forward subsumption
+  reaches a subsumer after fewer tries. On 6 of the 174 comparable corpus runs
+  the `Nonunit_fsub_feature_tests` statistic falls — always falls, never rises:
+  `quot-comm` 5367→4694, `GEO147+1` 8080→7901, `SET587+3` 3194→3102,
+  `SET668+3` 2053→1996, `wang-eq` 5392→5349, `HWV006-1` 44→42.
+- `struct di_tree` grows from 24 to 32 bytes, so the memory report prints
+  `di_tree (  32)`. The node *count* falls by far more than the size rises.
+
+Those 8 runs (the 6 above plus the `max_megs` pair) are the whole of the A/B
+difference, against an A/A floor of 0.
+
+40 of the 105 prover9 runs in the comparable set drive this index, several with
+19 000 forward tests, so the corpus does exercise the traversal — worth
+checking, because on CSR040-10 itself the index is empty: `di_tree_forward` was
+called 37 537 times and cost 0.00 seconds, on vectors that took a quarter of
+the run to build and discard.
 
 ### PF6 — `logic_term()` identifies connectives by comparing symbol names
 `ladr/formula.c` — **found but not fixed**
@@ -1501,10 +1573,32 @@ built, so caching them and comparing integers would remove essentially all of
 it. Left alone here because it touches the formula representation that
 everything else in the tree reads, and PF3 was the larger effect.
 
-PF6 is recorded rather than fixed, as is the remaining half of PF4. Both are on
-the input path that a large knowledge base takes, and both were found by
-measuring something else — which is the argument for measuring before
-optimising, not after.
+### PF7 — `eq_defs()` accumulates dependents by walking to the tail
+`provers.src/unfold.c` — **found but not fixed**
+
+With the feature vector sparse, **51%** of what remains of CSR040-10 is
+`ilist_cat`, called 22 512 times from `eq_defs()`:
+
+```c
+table[symbol].dependents = ilist_cat(table[symbol].dependents,
+                                     fsym_set_in_term(beta));
+...
+if (!ilist_member(symbols, symbol))
+  symbols = ilist_append(symbols, symbol);
+```
+
+`ilist_cat` walks the accumulated list to find its tail, so building a symbol's
+dependent list costs O(length) per definition; and `ilist_member` plus
+`ilist_append` over `symbols` is O(length) twice per definition. Both are
+quadratic in the number of equational definitions, which for a knowledge base
+is large. The fix is the same shape as PF2 and PF3 — a tail pointer, and a
+membership flag array indexed by symnum, both of which already exist in the
+tree. `plist_append` at 44 231 calls (4% and climbing) is the same pattern one
+level out.
+
+PF6 and PF7 are recorded rather than fixed. Both are on the input path that a
+large knowledge base takes, and both were found by measuring something else —
+which is the argument for measuring before optimising, not after.
 
 ### Cumulative effect on a real knowledge-base-scale problem
 
@@ -1519,11 +1613,13 @@ together on `Problems/CSR/CSR040-10.p` — 5.7 MB of TPTP, 44 227 clauses and
 | after PF2 (symbol multiset) | 152.44 s |
 | after PF5 (iterative list functions) | 127.11 s |
 | after PF3 (predicate elimination) | 114.09 s |
-| after PF4 part 1 (feature vector) | **95.50 s** |
+| after PF4 part 1 (feature vector built cheaply) | 95.50 s |
+| after PF4 part 2 (feature vector made sparse) | **31.81 s** |
 
-1.64x overall, and the shape matters more than the factor: what remains is
-dominated by the part of PF4 that is still O(clauses × symbols), so the gap
-widens with the size of the knowledge base.
+**5.3x overall**, and the shape matters more than the factor: the two largest
+fixes removed costs proportional to the *vocabulary* rather than to the data,
+so the gap widens with the size of the knowledge base. What remains is
+dominated by PF7.
 
 Note also that PF3's 106x on the synthetic ladder is 1.12x here, because most
 of this problem's predicates are not eliminable and the cubic loop barely runs.
