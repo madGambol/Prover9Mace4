@@ -2054,6 +2054,155 @@ int multiset_occurrences(I2list m, int i)
 
 /*************
  *
+ *   Appending in O(1), with the caller holding the tail
+ *
+ *************/
+
+/* WHY THESE EXIST
+ *
+ * A Plist IS the pointer to its first cell -- there is no list object, no
+ * header holding first/last/count:
+ *
+ *     typedef struct plist * Plist;
+ *     struct plist { void *v; Plist next; };
+ *
+ * So plist_append(lst, v) is handed only the head and has nowhere to keep a
+ * tail pointer, even if it wanted one.  Walking to the end is forced by the
+ * representation, not an oversight in the function -- and plist_prepend is
+ * O(1) for the same reason, since prepending needs to know nothing about the
+ * end.
+ *
+ * The consequence is a trap: the two look equally innocent at a call site,
+ * and append is what you reach for whenever order matters, which is most of
+ * the time.  "X = plist_append(X, v)" inside a loop over the input is
+ * therefore quadratic, and the tree had 46 instances of exactly that shape.
+ * Four of them turned up as measured bottlenecks in the course of the work in
+ * FIXES.md -- the symbol multiset (PF2), the predicate-elimination candidate
+ * set (PF3), the equational-definition dependents (PF7), and nonneg_clauses
+ * (PF9), the worst of which cost 1.07 billion cell visits for an answer that
+ * was then discarded.
+ *
+ * Giving the header struct to Plist would fix it everywhere, but Plist is
+ * passed by value and returned across 92 call sites, Ilist across 58, and
+ * I2list and I3list the same way; every signature in the library would
+ * change.  So the tail lives with the caller instead, and these four
+ * functions make that a one-liner rather than six lines of cell plumbing
+ * repeated at each site:
+ *
+ *     Plist lst = NULL, tail = NULL;
+ *     for (...)
+ *       lst = plist_tail_append(lst, &tail, v);
+ *
+ * The result is identical to repeated plist_append: same cells, same order.
+ * *tail must start NULL and belong to this list alone.
+ */
+
+/*************
+ *
+ *   plist_tail_append()
+ *
+ *************/
+
+/* DOCUMENTATION
+Append v to lst in O(1), using a tail pointer the caller holds.  Initialise
+*tail to NULL alongside an empty lst, then pass the same tail on every call.
+Equivalent to plist_append(lst, v) but without the walk.
+*/
+
+/* PUBLIC */
+Plist plist_tail_append(Plist lst, Plist *tail, void *v)
+{
+  Plist g = get_plist();
+  g->v = v;
+  g->next = NULL;
+  if (*tail)
+    (*tail)->next = g;
+  else
+    lst = g;
+  *tail = g;
+  return lst;
+}  /* plist_tail_append */
+
+/*************
+ *
+ *   ilist_tail_append()
+ *
+ *************/
+
+/* DOCUMENTATION
+Append i to lst in O(1), using a tail pointer the caller holds.  See
+plist_tail_append().
+*/
+
+/* PUBLIC */
+Ilist ilist_tail_append(Ilist lst, Ilist *tail, int i)
+{
+  Ilist g = get_ilist();
+  g->i = i;
+  g->next = NULL;
+  if (*tail)
+    (*tail)->next = g;
+  else
+    lst = g;
+  *tail = g;
+  return lst;
+}  /* ilist_tail_append */
+
+/*************
+ *
+ *   i2list_tail_append()
+ *
+ *************/
+
+/* DOCUMENTATION
+Append (i,j) to lst in O(1), using a tail pointer the caller holds.  See
+plist_tail_append().
+*/
+
+/* PUBLIC */
+I2list i2list_tail_append(I2list lst, I2list *tail, int i, int j)
+{
+  I2list g = get_i2list();
+  g->i = i;
+  g->j = j;
+  g->next = NULL;
+  if (*tail)
+    (*tail)->next = g;
+  else
+    lst = g;
+  *tail = g;
+  return lst;
+}  /* i2list_tail_append */
+
+/*************
+ *
+ *   i3list_tail_append()
+ *
+ *************/
+
+/* DOCUMENTATION
+Append (i,j,k) to lst in O(1), using a tail pointer the caller holds.  See
+plist_tail_append().
+*/
+
+/* PUBLIC */
+I3list i3list_tail_append(I3list lst, I3list *tail, int i, int j, int k)
+{
+  I3list g = get_i3list();
+  g->i = i;
+  g->j = j;
+  g->k = k;
+  g->next = NULL;
+  if (*tail)
+    (*tail)->next = g;
+  else
+    lst = g;
+  *tail = g;
+  return lst;
+}  /* i3list_tail_append */
+
+/*************
+ *
  *   I2accum -- a multiset of ints with O(1) amortised insertion
  *
  *************/

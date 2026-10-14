@@ -2932,7 +2932,7 @@ Prover_results forking_search(Prover_input input)
       Ibuffer ibuf = fd_read_to_ibuf(from_child);
       int num_proofs, num_steps, i, j;
       int num_new_symbols;
-      I2list new_syms = NULL;
+      I2list new_syms = NULL, new_syms_tail = NULL;
 
       results = calloc(1, sizeof(struct prover_results));
       
@@ -2942,7 +2942,7 @@ Prover_results forking_search(Prover_input input)
       for (i = 0; i < num_new_symbols; i++) {
 	int symnum = ibuf_read(ibuf);
 	ArityType arity = ibuf_read(ibuf);
-	new_syms = i2list_append(new_syms, symnum, arity);
+	new_syms = i2list_tail_append(new_syms, &new_syms_tail, symnum, arity);
       }
       add_new_symbols(new_syms);  /* add new symbols to symbol table */
       zap_i2list(new_syms);

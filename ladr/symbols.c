@@ -1609,12 +1609,13 @@ Ilist all_function_symbols(void)
 {
   Ilist syms = NULL;
   int i;
+  Ilist tail = NULL;
   for (i = 0; i < SYM_TAB_SIZE; i++) {
     Plist p;
     for (p = By_id[i]; p; p = p->next) {
       Symbol s = p->v;
       if (s->type == FUNCTION_SYMBOL)
-	syms = ilist_append(syms, s->symnum);
+	syms = ilist_tail_append(syms, &tail, s->symnum);
     }
   }
   return syms;
@@ -1634,12 +1635,13 @@ Ilist all_relation_symbols(void)
 {
   Ilist syms = NULL;
   int i;
+  Ilist tail = NULL;
   for (i = 0; i < SYM_TAB_SIZE; i++) {
     Plist p;
     for (p = By_id[i]; p; p = p->next) {
       Symbol s = p->v;
       if (s->type == PREDICATE_SYMBOL)
-	syms = ilist_append(syms, s->symnum);
+	syms = ilist_tail_append(syms, &tail, s->symnum);
     }
   }
   return syms;
@@ -2111,12 +2113,13 @@ Ilist syms_with_lex_val(void)
 {
   Ilist g = NULL;
   int i;
+  Ilist tail = NULL;
   for (i = 0; i < SYM_TAB_SIZE; i++) {
     Plist p;
     for (p = By_id[i]; p; p = p->next) {
       Symbol s = p->v;
       if (s->lex_val != INT_MAX)
-	g = ilist_append(g, s->symnum);
+	g = ilist_tail_append(g, &tail, s->symnum);
     }
   }
   return g;
@@ -2496,16 +2499,16 @@ Ilist current_rsym_precedence()
 /* PUBLIC */
 Ilist not_in_preliminary_precedence(Ilist syms, Symbol_type type)
 {
-  Ilist missing = NULL;
+  Ilist missing = NULL, tail = NULL;
   Ilist p;
   for (p = syms; p; p = p->next) {
     if (type == FUNCTION_SYMBOL &&
 	position_in_ilist(p->i, Preliminary_prec_func) == -1)
-      missing = ilist_append(missing, p->i);
+      missing = ilist_tail_append(missing, &tail, p->i);
 
     else if (type == PREDICATE_SYMBOL &&
 	     position_in_ilist(p->i, Preliminary_prec_pred) == -1)
-      missing = ilist_append(missing, p->i);
+      missing = ilist_tail_append(missing, &tail, p->i);
   }
   return missing;
 }  /* not_in_preliminary_precedence */
@@ -2857,11 +2860,11 @@ void mark_for_new_symbols(void)
 /* PUBLIC */
 I2list new_symbols_since_mark(void)
 {
-  I2list p = NULL;
+  I2list p = NULL, tail = NULL;
   int sn;
   for (sn = Mark_for_new_symbols; sn <= Symbol_count; sn++) {
     if (function_or_relation_symbol(sn)) {
-      p = i2list_append(p, sn, sn_to_arity(sn));
+      p = i2list_tail_append(p, &tail, sn, sn_to_arity(sn));
     }
   }
   return p;
@@ -3117,14 +3120,14 @@ int symbol_with_string(Ilist syms, char *str)
 /* PUBLIC */
 void process_skolem_list(Plist skolem_strings, Ilist fsyms)
 {
-  Ilist skolems = NULL;
+  Ilist skolems = NULL, skolems_tail = NULL;
   Plist p;
   for (p = skolem_strings; p; p = p->next) {
     int sn = symbol_with_string(fsyms, p->v);
     if (sn == -1)
       fprintf(stderr, "WARNING, declared Skolem symbol not found in formulas: %s\n", (char *) p->v);
     else
-      skolems = ilist_append(skolems, sn);
+      skolems = ilist_tail_append(skolems, &skolems_tail, sn);
   }
   set_skolem_symbols(skolems);
   zap_ilist(skolems);
@@ -3142,15 +3145,15 @@ void process_skolem_list(Plist skolem_strings, Ilist fsyms)
 /* PUBLIC */
 void process_lex_list(Plist lex_strings, Ilist syms, Symbol_type type)
 {
-  Ilist lexs = NULL;
+  Ilist lexs = NULL, lexs_tail = NULL;
   Plist p;
-  Plist not_in_formulas = NULL;
+  Plist not_in_formulas = NULL, nif_tail = NULL;
   for (p = lex_strings; p; p = p->next) {
     int sn = symbol_with_string(syms, p->v);
     if (sn == -1)
-      not_in_formulas = plist_append(not_in_formulas, p->v);
+      not_in_formulas = plist_tail_append(not_in_formulas, &nif_tail, p->v);
     else
-      lexs = ilist_append(lexs, sn);
+      lexs = ilist_tail_append(lexs, &lexs_tail, sn);
   }
   if (not_in_formulas) {
     char *s = (type == FUNCTION_SYMBOL ? "function" : "predicate");

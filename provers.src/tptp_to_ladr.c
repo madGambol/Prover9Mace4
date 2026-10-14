@@ -65,6 +65,7 @@
 #define DO_PREFIX "tptp_do_"
 
 static Plist Distinct_objects = NULL;   /* texts, in order of first sighting */
+static Plist Distinct_objects_tail = NULL;  /* so appending is O(1) */
 static int   Distinct_count = 0;
 static BOOL  Do_prefix_in_input = FALSE;  /* input already uses our prefix */
 
@@ -76,7 +77,8 @@ int distinct_object_index(char *text)
   for (p = Distinct_objects; p != NULL; p = p->next, i++)
     if (str_ident(text, p->v))
       return i;
-  Distinct_objects = plist_append(Distinct_objects, new_str_copy(text));
+  Distinct_objects = plist_tail_append(Distinct_objects, &Distinct_objects_tail,
+				       new_str_copy(text));
   return Distinct_count++;
 }
 
