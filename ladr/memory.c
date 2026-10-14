@@ -23,11 +23,31 @@
    set_max_megs(n) or assign(max_megs,n).  500 was the 2009 figure.  Nothing
    in the design ties the limit to that number -- the option has always
    accepted anything up to INT_MAX, and -1 for no limit -- but two counters
-   below did track it, and they are widened in this commit so that raising it
-   is actually safe.  1000 is a cautious step rather than the maximum: on a
-   machine with tens of gigabytes the old default stopped searches that had
-   plenty of room left, and it was the binding constraint on a number of TPTP
-   problems (ALG021+1 hits it in four seconds). */
+   below did track it, and they are widened so that raising it is actually
+   safe.
+
+   WHAT THIS DEFAULT DOES AND DOES NOT GOVERN.  It applies only to programs
+   that never call set_max_megs().  prover9 and mace4 both do call it, from
+   their own max_megs PARAMETER, whose default is still 500:
+
+       provers.src/search.c:  init_parm("max_megs", 500, -1, INT_MAX)
+       mace4.src/msearch.c:   init_parm("max_megs", 500, -1, INT_MAX)
+       provers.src/provers.c: set_max_megs(parm(prover_opt->max_megs))
+
+   so raising the figure here did NOT raise the effective ceiling for the two
+   provers.  Verified rather than assumed: prover9 on ALG021+1 still exits
+   max_megs with its default, and does not with an explicit
+   assign(max_megs, 1000).  Any earlier wording suggesting otherwise was
+   wrong.
+
+   What this default does govern is the auxiliary programs, and that is where
+   it mattered: tptp_to_ladr parses only -q, never calls set_max_megs(), and
+   so had no way at all to ask for more than the default.  Three HWV problems
+   of 278-298 MB died at 500 and translate at 1000.
+
+   Raising the two provers' parameter defaults as well is a separate decision,
+   because it changes results: a search that stopped at 500 MB would run on,
+   and memory-bounded runs would reach different conclusions.  Left at 500. */
 
 #define DEFAULT_MAX_MEGS 1000
 #define MAX_MEM_LISTS     500  /* number of lists of available nodes */

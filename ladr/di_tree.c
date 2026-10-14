@@ -171,34 +171,49 @@ Di_tree init_di_tree(void)
 /* DOCUMENTATION
 */
 
-/* PUBLIC */
-void di_tree_insert(Ilist vec, Di_tree node, void *datum)
+/* Is (position, label) before (p, l) in sibling order? */
+
+static
+BOOL di_before(int position, int label, int p, int l)
 {
-  if (vec == NULL) {
-    Plist p = get_plist();
-    p->v = datum;
-    p->next = node->u.data;
-    node->u.data = p;
-  }
-  else {
+  return position < p || (position == p && label < l);
+}  /* di_before */
+
+/* PUBLIC */
+void di_tree_insert(I2list vec, Di_tree node, void *datum)
+{
+  /* Iterative: the dense version recursed once per feature position, so the
+     recursion was as deep as the vector was long -- around 28,600 frames on a
+     knowledge-base-sized input.  A sparse path is short, but there is no
+     reason to recurse for it. */
+  for (; vec; vec = vec->next) {
     Di_tree prev = NULL;
-    Di_tree curr = node->u.kids;
-    /* kids are in increasing order */
-    while (curr && vec->i > curr->label) {
+    Di_tree curr = node->kids;
+    /* siblings are ordered by (position, label) */
+    while (curr && di_before(curr->position, curr->label, vec->i, vec->j)) {
       prev = curr;
       curr = curr->next;
     }
-    if (curr == NULL || vec->i != curr->label) {
+    if (curr == NULL || curr->position != vec->i || curr->label != vec->j) {
       Di_tree new = get_di_tree();
-      new->label = vec->i;
+      new->position = vec->i;
+      new->label = vec->j;
       new->next = curr;
+      new->kids = NULL;
+      new->data = NULL;
       if (prev)
 	prev->next = new;
       else
-	node->u.kids = new;
+	node->kids = new;
       curr = new;
     }
-    di_tree_insert(vec->next, curr, datum);
+    node = curr;
+  }
+  {
+    Plist p = get_plist();
+    p->v = datum;
+    p->next = node->data;
+    node->data = p;
   }
 }  /* di_tree_insert */
 
@@ -212,22 +227,24 @@ void di_tree_insert(Ilist vec, Di_tree node, void *datum)
 */
 
 /* PUBLIC */
-BOOL di_tree_delete(Ilist vec, Di_tree node, void *datum)
+BOOL di_tree_delete(I2list vec, Di_tree node, void *datum)
 {
   if (vec == NULL) {
-    node->u.data = plist_remove(node->u.data, datum);
-    return node->u.data != NULL;  /* tells parent whether to keep node */
+    node->data = plist_remove(node->data, datum);
+    /* A node is worth keeping if anything still hangs off it.  In the dense
+       tree only leaves held data, so "keep" meant "data remains"; a node can
+       hold data AND children now, so both have to be checked. */
+    return node->data != NULL || node->kids != NULL;
   }
   else {
     BOOL keep;
     Di_tree prev = NULL;
-    Di_tree curr = node->u.kids;
-    /* kids are in increasing order */
-    while (curr && vec->i > curr->label) {
+    Di_tree curr = node->kids;
+    while (curr && di_before(curr->position, curr->label, vec->i, vec->j)) {
       prev = curr;
       curr = curr->next;
     }
-    if (curr == NULL || vec->i != curr->label)
+    if (curr == NULL || curr->position != vec->i || curr->label != vec->j)
       fatal_error("di_tree_delete, node not found");
     keep = di_tree_delete(vec->next, curr, datum);
     if (keep)
@@ -236,9 +253,9 @@ BOOL di_tree_delete(Ilist vec, Di_tree node, void *datum)
       if (prev)
 	prev->next = curr->next;
       else
-	node->u.kids = curr->next;
+	node->kids = curr->next;
       free_di_tree(curr);
-      return node->u.kids != NULL;
+      return node->data != NULL || node->kids != NULL;
     }
   }
 }  /* di_tree_delete */
@@ -253,17 +270,20 @@ BOOL di_tree_delete(Ilist vec, Di_tree node, void *datum)
 */
 
 /* PUBLIC */
-void zap_di_tree(Di_tree node, int depth)
+void zap_di_tree(Di_tree node)
 {
-  if (depth == 0)
-    zap_plist(node->u.data);
-  else {
-    Di_tree kid = node->u.kids;
-    while (kid) {
-      Di_tree tmp = kid;
-      kid = kid->next;
-      zap_di_tree(tmp, depth-1);
-    }
+  /* No depth argument any more: paths have different lengths, so the tree is
+     taken apart by its own structure rather than by a count the caller had to
+     supply from feature_length(). */
+  Di_tree kid;
+  if (node == NULL)
+    return;
+  zap_plist(node->data);
+  kid = node->kids;
+  while (kid) {
+    Di_tree tmp = kid;
+    kid = kid->next;
+    zap_di_tree(tmp);
   }
   free_di_tree(node);
 }  /* zap_di_tree */
@@ -278,27 +298,29 @@ void zap_di_tree(Di_tree node, int depth)
 */
 
 /* PUBLIC */
-void p_di_tree(Ilist vec, Di_tree node, int depth)
+void p_di_tree(Di_tree node, int depth)
 {
   int i;
+  Di_tree kid;
+  if (node == NULL)
+    return;
   for (i = 0; i < depth; i++)
     printf(" ");
-  if (vec == NULL) {
-    Plist p = node->u.data;
-    printf("IDs:");
-    while (p) {
+  if (depth == 0)
+    printf("root");
+  else
+    printf("[%d]=%d", node->position, node->label);
+  if (node->data) {
+    Plist p;
+    printf("  IDs:");
+    for (p = node->data; p; p = p->next) {
       Topform c = p->v;
       printf(" %d", c->id);
-      p = p->next;
     }
-    printf("\n");
   }
-  else {
-    Di_tree kid;
-    printf("%d\n", node->label);
-    for (kid = node->u.kids; kid; kid = kid->next)
-      p_di_tree(vec->next, kid, depth+1);
-  }
+  printf("\n");
+  for (kid = node->kids; kid; kid = kid->next)
+    p_di_tree(kid, depth+1);
 }  /* p_di_tree */
 
 /*************
@@ -355,32 +377,195 @@ BOOL subsumes_di(Literals c, Literals d, Context subst)
  *
  *************/
 
+/* The two traversals.
+ *
+ * Both are written once, as a walk that calls back with the data at each node
+ * it accepts, so that the filter the provers use and the filter
+ * test.src/features_test.c checks against brute force are the same code.
+ *
+ * `vec` is the QUERY vector, sparse and in increasing position order.  An
+ * absent position means zero, and every value stored in the tree is non-zero,
+ * which is what makes the pruning below sound.
+ */
+
+/* The query's value at `position`, and the suffix of the query at or after
+   it.  Sibling positions are non-decreasing, so the cursor only moves
+   forward across one node's children. */
+
 static
-Topform di_tree_forward(Ilist vec, Di_tree node, Literals dlits, Context subst)
+int di_value_at(I2list *vecp, int position)
 {
+  I2list v = *vecp;
+  while (v && v->i < position)
+    v = v->next;
+  *vecp = v;
+  return (v && v->i == position) ? v->j : 0;
+}  /* di_value_at */
+
+/* The suffix of `vec` strictly after `position`. */
+
+static
+I2list di_after(I2list vec, int position)
+{
+  while (vec && vec->i <= position)
+    vec = vec->next;
+  return vec;
+}  /* di_after */
+
+/* Walk every node whose path spells a stored vector <= vec.
+ *
+ * A node is reached only by descending children whose required value is met
+ * by the query, so every constraint on the path already holds.  A stored
+ * vector therefore qualifies exactly when its path has been walked -- which
+ * is why data is offered at EVERY node, not only at the end of the vector.
+ * The dense version could only accept at depth == length, because every path
+ * had the same length.
+ *
+ * fn returns TRUE to stop the walk (forward subsumption wants the first hit).
+ */
+
+static
+BOOL di_walk_le(I2list vec, Di_tree node,
+		BOOL (*fn)(Plist, void *), void *state)
+{
+  Di_tree kid;
   BUMP_SUB_CALLS;
-  if (vec == NULL) {
-    Plist p = node->u.data;
-    while (p) {
-      Topform c = p->v;
-      Nonunit_fsub_tests++;
-      if (subsumes_di(c->literals, dlits, subst))
-	return p->v;
-      p = p->next;
-    }
-    return NULL;
+
+  if (node->data && fn(node->data, state))
+    return TRUE;
+
+  for (kid = node->kids; kid; kid = kid->next) {
+    I2list cursor = vec;
+    int qv = di_value_at(&cursor, kid->position);
+    if (kid->label <= qv &&
+	di_walk_le(di_after(cursor, kid->position), kid, fn, state))
+      return TRUE;
+    /* If kid->label > qv this child is pruned.  Later siblings at the same
+       position have larger labels and are pruned too, but siblings at a
+       larger position are not, so the loop continues rather than breaking. */
   }
-  else {
-    void *datum = NULL;
-    Di_tree kid = node->u.kids;
-    /* kids are in increasing order; look at those <= vec->i */
-    while (!datum && kid && kid->label <= vec->i) {
-      datum = di_tree_forward(vec->next, kid, dlits, subst);
-      kid = kid->next;
+  return FALSE;
+}  /* di_walk_le */
+
+/* Walk every node whose path spells a stored vector >= vec.
+ *
+ * Here the stored vector must cover every position the query constrains.
+ * Walking the two in step: a child at a position BEFORE the next required one
+ * is an entry the query does not constrain, so it is followed freely; a child
+ * AT that position must meet the required value; and a child at a position
+ * PAST it means this branch skips a position the query needs, so the stored
+ * value there is zero and the branch cannot qualify.  Positions increase down
+ * a path and across siblings, so that last case prunes every remaining
+ * sibling as well.
+ *
+ * Data is accepted only once the query is exhausted -- anything earlier has
+ * not covered the remaining constraints.
+ */
+
+static
+void di_walk_ge(I2list vec, Di_tree node,
+		void (*fn)(Plist, void *), void *state)
+{
+  Di_tree kid;
+  BUMP_SUB_CALLS;
+
+  if (vec == NULL && node->data)
+    fn(node->data, state);
+
+  for (kid = node->kids; kid; kid = kid->next) {
+    if (vec == NULL || kid->position < vec->i)
+      di_walk_ge(vec, kid, fn, state);
+    else if (kid->position == vec->i) {
+      if (kid->label >= vec->j)
+	di_walk_ge(vec->next, kid, fn, state);
+      /* labels ascend within a position, so a smaller one here just means
+	 this child fails; later ones may still pass */
     }
-    return datum;
+    else
+      break;                     /* every remaining sibling is past vec->i */
   }
-}  /* di_tree_forward */
+}  /* di_walk_ge */
+
+/* ---- the provers' two entry points, over those walks ---- */
+
+struct fsub_state { Literals dlits; Context subst; Topform found; };
+
+static
+BOOL fsub_visit(Plist data, void *vstate)
+{
+  struct fsub_state *st = vstate;
+  Plist p;
+  for (p = data; p; p = p->next) {
+    Topform c = p->v;
+    Nonunit_fsub_tests++;
+    if (subsumes_di(c->literals, st->dlits, st->subst)) {
+      st->found = c;
+      return TRUE;
+    }
+  }
+  return FALSE;
+}  /* fsub_visit */
+
+struct bsub_state { Literals clits; Context subst; Plist subsumees; };
+
+static
+void bsub_visit(Plist data, void *vstate)
+{
+  struct bsub_state *st = vstate;
+  Plist p;
+  for (p = data; p; p = p->next) {
+    Topform d = p->v;
+    Nonunit_bsub_tests++;
+    if (st->clits != d->literals && subsumes_di(st->clits, d->literals, st->subst))
+      st->subsumees = plist_prepend(st->subsumees, d);
+  }
+}  /* bsub_visit */
+
+/* ---- the filter alone, for the test suite ---- */
+
+static
+BOOL collect_le(Plist data, void *vstate)
+{
+  Plist *out = vstate;
+  Plist p;
+  for (p = data; p; p = p->next)
+    *out = plist_prepend(*out, p->v);
+  return FALSE;                  /* never stop; collect everything */
+}  /* collect_le */
+
+static
+void collect_ge(Plist data, void *vstate)
+{
+  Plist *out = vstate;
+  Plist p;
+  for (p = data; p; p = p->next)
+    *out = plist_prepend(*out, p->v);
+}  /* collect_ge */
+
+/* DOCUMENTATION
+Every datum whose stored vector is <= vec componentwise.  The retrieval filter
+without the subsumption test that normally follows it.
+*/
+
+/* PUBLIC */
+Plist di_tree_data_le(I2list vec, Di_tree root)
+{
+  Plist out = NULL;
+  di_walk_le(vec, root, collect_le, &out);
+  return out;
+}  /* di_tree_data_le */
+
+/* DOCUMENTATION
+Every datum whose stored vector is >= vec componentwise.
+*/
+
+/* PUBLIC */
+Plist di_tree_data_ge(I2list vec, Di_tree root)
+{
+  Plist out = NULL;
+  di_walk_ge(vec, root, collect_ge, &out);
+  return out;
+}  /* di_tree_data_ge */
 
 /*************
  *
@@ -394,12 +579,15 @@ Topform di_tree_forward(Ilist vec, Di_tree node, Literals dlits, Context subst)
 /* PUBLIC */
 Topform forward_feature_subsume(Topform d, Di_tree root)
 {
-  Ilist f = features(d->literals);
-  Context subst = get_context();
-  Topform c = di_tree_forward(f, root, d->literals, subst);
-  free_context(subst);
-  zap_ilist(f);
-  return c;
+  I2list f = features(d->literals);
+  struct fsub_state st;
+  st.dlits = d->literals;
+  st.subst = get_context();
+  st.found = NULL;
+  di_walk_le(f, root, fsub_visit, &st);
+  free_context(st.subst);
+  zap_i2list(f);
+  return st.found;
 }  /* forward_feature_subsume */
 
 /*************
@@ -408,52 +596,18 @@ Topform forward_feature_subsume(Topform d, Di_tree root)
  *
  *************/
 
-static
-void di_tree_back(Ilist vec, Di_tree node, Literals clits, Context subst,
-		  Plist *subsumees)
-{
-  BUMP_SUB_CALLS;
-  if (vec == NULL) {
-    Plist p = node->u.data;
-    while (p) {
-      Topform d = p->v;
-      Nonunit_bsub_tests++;
-      if (clits != d->literals && subsumes_di(clits, d->literals, subst))
-	*subsumees = plist_prepend(*subsumees, d);
-      p = p->next;
-    }
-  }
-  else {
-    Di_tree kid = node->u.kids;
-    /* kids are in increasing order; look at those >= vec->i */
-    while (kid && kid->label < vec->i)
-      kid = kid->next;
-    while (kid) {
-      di_tree_back(vec->next, kid, clits, subst, subsumees);
-      kid = kid->next;
-    }
-  }
-}  /* di_tree_back */
-
-/*************
- *
- *   back_feature_subsume()
- *
- *************/
-
-/* DOCUMENTATION
-*/
-
 /* PUBLIC */
 Plist back_feature_subsume(Topform c, Di_tree root)
 {
-  Ilist f = features(c->literals);
-  Context subst = get_context();
-  Plist subsumees = NULL;
-  di_tree_back(f, root, c->literals, subst, &subsumees);
-  free_context(subst);
-  zap_ilist(f);
-  return subsumees;
+  I2list f = features(c->literals);
+  struct bsub_state st;
+  st.clits = c->literals;
+  st.subst = get_context();
+  st.subsumees = NULL;
+  di_walk_ge(f, root, bsub_visit, &st);
+  free_context(st.subst);
+  zap_i2list(f);
+  return st.subsumees;
 }  /* back_feature_subsume */
 
 /*************

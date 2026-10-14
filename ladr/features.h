@@ -30,14 +30,20 @@
 
 /* Public function prototypes from features.c */
 
+/* A feature vector is SPARSE: an I2list of (position, value) pairs in
+   increasing position order, holding only the non-zero entries.  An absent
+   position means zero.  See the long comment at the top of features.c for the
+   layout and for why the index retrieves the same clauses as the dense
+   version it replaces. */
+
 void init_features(Ilist fsyms, Ilist rsyms);
 
-Ilist features(Literals lits);
+I2list features(Literals lits);
 
 int feature_length(void);
 
-BOOL features_less_or_equal(Ilist c, Ilist d);
+BOOL features_less_or_equal(I2list c, I2list d);
 
-void p_features(Ilist f);
+void p_features(I2list f);
 
 #endif  /* conditional compilation of whole file */
