@@ -395,8 +395,14 @@ Discrim discrim_bind_end(Term t, Discrim d, Plist *path_p)
     sym = SYMNUM(t);  /* arities fixed: handle both NAME and COMPLEX */
     while (d1 && DVAR(d1))  /* skip variables */
       d1 = d1->next;
-    while (d1 && d1->symbol < sym)
-      d1 = d1->next;
+
+    /* The index, not a walk.  This is NOT an optimisation here -- it is
+       required: on an indexed node the rigid children are no longer in
+       sorted order, so "while (d1 && d1->symbol < sym)" cannot find them and
+       this function would return NULL for a term that is present.  That is
+       how three corpus problems silently stopped being proved; see the note
+       on discrim_child_find() in discrim.c. */
+    d1 = discrim_child_find(d, d1, sym);
 
     if (d1 == NULL || d1->symbol != sym)
       return NULL;
@@ -466,6 +472,10 @@ void discrim_bind_delete(Term t, Discrim root, void *object)
 	parent->u.kids = d2->next;
       else
 	d3->next = d2->next;
+      /* Before freeing it: the parent's child index holds a pointer to this
+	 node, and leaving it there is a dangling pointer that retrieval and
+	 insertion would both happily return. */
+      discrim_child_removed(parent, d2);
       free_discrim(d2);
       end = parent;
     }
