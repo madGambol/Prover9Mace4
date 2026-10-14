@@ -45,6 +45,15 @@ void *get_mem(unsigned n);
 
 void free_mem(void *q, unsigned n);
 
+/* Accounting for allocators that are not palloc, so that max_megs still
+   means what it says.  See the comment on Bytes_external in memory.c. */
+
+void charge_external_mem(size_t n);
+
+void discharge_external_mem(size_t n);
+
+size_t external_mem_bytes(void);
+
 void memory_report(FILE *fp);
 
 int megs_malloced(void);

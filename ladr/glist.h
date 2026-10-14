@@ -264,6 +264,9 @@ I3list i3list_tail_append(I3list lst, I3list *tail, int i, int j, int k);
  * multiset_add_n() produces, so the two are interchangeable.
  */
 
+/* Implemented in i2accum_cxx.cpp, on std::unordered_map, behind this exact
+   interface.  The struct is opaque to C. */
+
 typedef struct i2accum * I2accum;
 
 I2accum get_i2accum(void);

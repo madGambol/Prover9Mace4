@@ -2,9 +2,19 @@
 
 CC = gcc
 
+# One translation unit is C++: i2accum_cxx.cpp implements the I2accum
+# multiset on std::unordered_map behind the same C interface it always had.
+# See the comment at the top of that file for why, and ladr/cxx_alloc.h for
+# how its allocations keep counting against max_megs.
+#
+# The C++ standard library has to be linked in wherever libladr.a is linked,
+# which is why CXXLIBS is exported for the program directories to pick up.
+CXX = g++
+
 # XFLAGS can be specified on the command line (see XFLAGS below)
 
 CFLAGS = $(XFLAGS) -O -Wall
+CXXFLAGS = $(XFLAGS) -O -Wall -std=c++17 
 # CFLAGS = $(XFLAGS) -O6 -Wall
 # CFLAGS = $(XFLAGS) -g  -O -Wall
 # CFLAGS = $(XFLAGS) -g -O0 -Wall
@@ -13,7 +23,7 @@ CFLAGS = $(XFLAGS) -O -Wall
 
 BASE_OBJ = order.o clock.o nonport.o\
 	   fatal.o ibuffer.o memory.o hash.o string.o strbuf.o\
-           glist.o options.o symbols.o avltree.o
+           glist.o i2accum_cxx.o options.o symbols.o symtab_cxx.o avltree.o
 TERM_OBJ = term.o termflag.o listterm.o tlist.o flatterm.o multiset.o\
 	   termorder.o parse.o accanon.o
 UNIF_OBJ = unify.o fpalist.o fpa.o discrim.o discrimb.o discrimw.o\
@@ -34,6 +44,9 @@ MISC_OBJ = std_options.o banner.o ioutil.o tptp_trans.o top_input.o
 
 OBJECTS = $(BASE_OBJ) $(TERM_OBJ) $(UNIF_OBJ) $(CLAS_OBJ)\
           $(INFE_OBJ) $(MODL_OBJ) $(MISC_OBJ)
+
+%.o: %.cpp
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 libladr.a: $(OBJECTS)
 	$(AR) rs libladr.a $(OBJECTS)

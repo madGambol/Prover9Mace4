@@ -84,7 +84,27 @@ struct discrim {       /* node in a discrimination tree */
      int32_t costs nothing: there were already five bytes of padding after the
      short, so struct discrim is 24 bytes either way. */
 
+  /* An optional symbol-keyed index over this node's RIGID children, built
+     lazily once there are enough of them to be worth it.  NULL on almost
+     every node.
+
+     Why: the children are a sorted linked list and both insert and retrieve
+     find the right one by walking it, so the cost of each is the fan-out at
+     that node.  Measured on Problems/CSR/CSR040-10.p, 105.9 million sibling
+     steps in one run, and NOT where it looks: only 177,751 of them are at the
+     root, while 96.8 million -- 91% -- are at depths 1 and 2, the ARGUMENTS of
+     the top-level symbol.  Those nodes average 269 and 288 steps per visit.
+
+     The list is deliberately left exactly as it was, because retrieval pushes
+     `d->next` as its backtracking alternatives and so depends on the order.
+     This index only lets the forward scan be SKIPPED; it never replaces the
+     list.  See discrim_child_find() in discrim.c. */
+
+  struct discrim_index *child_index;  /* NULL until promoted */
+
   int32_t symbol;      /* see above: a varnum, a symnum, or an arity */
+  uint16_t nkids;      /* rigid children so far, saturating at the promotion
+			  threshold; it fits in what was padding */
   char type;           /* term type and for ac indexing type */
 };
 
@@ -102,6 +122,33 @@ struct discrim_pos {  /* to save position in set of answers */
 enum { DVARIABLE, DRIGID, AC_ARG_TYPE, AC_NV_ARG_TYPE };
 
 #define DVAR(d)  ((d)->type == DVARIABLE)
+
+/* The per-node child index.  Opaque; discrim.c owns it and free_discrim()
+   releases it, so no caller has to think about its lifetime. */
+
+struct discrim_index;
+
+/* Find the rigid child of `parent` whose symbol is `symbol`, starting the
+   search at `from` (which the caller has already advanced past the variable
+   children).  Returns that child, or the first child at-or-after `from` whose
+   symbol exceeds `symbol`, or NULL -- exactly what the hand-written forward
+   scan returned, which is what makes it a drop-in replacement. */
+
+Discrim discrim_child_find(Discrim parent, Discrim from, int32_t symbol);
+
+/* Tell the index that a rigid child was added or removed.  Both are no-ops
+   until the node has enough children to be promoted. */
+
+void discrim_child_added(Discrim parent, Discrim child);
+
+void discrim_child_removed(Discrim parent, Discrim child);
+
+/* An indexed node's rigid children need not be sorted, so they can be
+   appended in O(1) rather than spliced into position. */
+
+BOOL discrim_child_indexed(Discrim parent);
+
+void discrim_child_append(Discrim parent, Discrim child);
 
 /* End of public definitions */
 

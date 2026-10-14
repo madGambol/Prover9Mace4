@@ -5,6 +5,11 @@ CC = gcc
 # XFLAGS can be specified on the command line (see XFLAGS below)
 
 CFLAGS = $(XFLAGS) -O -Wall
+
+# libladr.a contains one C++ translation unit (i2accum_cxx.cpp), so the C++
+# standard library has to be linked wherever libladr is linked.  -lstdc++
+# rather than linking with g++, so that CC and CFLAGS stay as they were.
+LADRLIBS = -lstdc++
 # CFLAGS = $(XFLAGS) -O6 -Wall
 # CFLAGS = $(XFLAGS) -g  -O -Wall
 CFLAGS = $(XFLAGS) -g  -O0 -Wall
@@ -32,50 +37,50 @@ tags:
 apps: $(PROGRAMS)
 
 avltest: avltest.o
-	$(CC) $(CFLAGS) -o avltest avltest.o ../ladr/libladr.a -lm
+	$(CC) $(CFLAGS) -o avltest avltest.o ../ladr/libladr.a -lm $(LADRLIBS)
 
 strbuf_test: strbuf_test.o
-	$(CC) $(CFLAGS) -o strbuf_test strbuf_test.o ../ladr/libladr.a -lm
+	$(CC) $(CFLAGS) -o strbuf_test strbuf_test.o ../ladr/libladr.a -lm $(LADRLIBS)
 
 # Checks that a BOOL holds only TRUE or FALSE; microseconds.
 bool_test: bool_test.o
-	$(CC) $(CFLAGS) -o bool_test bool_test.o ../ladr/libladr.a -lm
+	$(CC) $(CFLAGS) -o bool_test bool_test.o ../ladr/libladr.a -lm $(LADRLIBS)
 
 # Checks that the discrimination index's key field is wide enough for a symbol
 # number: it was a short, which truncates above 32,767 and makes the prover
 # abort.  Needs ~40,000 symbols, so a second or two -- tier2.
 discrim_test: discrim_test.o
-	$(CC) $(CFLAGS) -o discrim_test discrim_test.o ../ladr/libladr.a -lm
+	$(CC) $(CFLAGS) -o discrim_test discrim_test.o ../ladr/libladr.a -lm $(LADRLIBS)
 
 # Checks the sparse feature-vector index against a brute-force dense scan, in
 # both directions, on random data; under a second.
 features_test: features_test.o
-	$(CC) $(CFLAGS) -o features_test features_test.o ../ladr/libladr.a -lm
+	$(CC) $(CFLAGS) -o features_test features_test.o ../ladr/libladr.a -lm $(LADRLIBS)
 
 # Checks the 40 list functions that used to recurse once per element: the
 # transcript must match what the recursive versions produced, byte for byte,
 # and a 400,000-element list must not overflow the stack; under a second.
 glist_test: glist_test.o
-	$(CC) $(CFLAGS) -o glist_test glist_test.o ../ladr/libladr.a -lm
+	$(CC) $(CFLAGS) -o glist_test glist_test.o ../ladr/libladr.a -lm $(LADRLIBS)
 
 # Checks the symbol-multiset packages: that the hash accumulator agrees with
 # the list implementation element for element and IN ORDER (precedence, and so
 # every proof, depends on that order), and that neither is quadratic or
 # recursive any more; under a second.
 multiset_test: multiset_test.o
-	$(CC) $(CFLAGS) -o multiset_test multiset_test.o ../ladr/libladr.a -lm
+	$(CC) $(CFLAGS) -o multiset_test multiset_test.o ../ladr/libladr.a -lm $(LADRLIBS)
 
 # Checks the named types around variables and symbols; microseconds.
 varnum_test: varnum_test.o
-	$(CC) $(CFLAGS) -o varnum_test varnum_test.o ../ladr/libladr.a -lm
+	$(CC) $(CFLAGS) -o varnum_test varnum_test.o ../ladr/libladr.a -lm $(LADRLIBS)
 
 # Checks the arity ceiling and that widening it cost no memory; milliseconds.
 arity_test: arity_test.o
-	$(CC) $(CFLAGS) -o arity_test arity_test.o ../ladr/libladr.a -lm
+	$(CC) $(CFLAGS) -o arity_test arity_test.o ../ladr/libladr.a -lm $(LADRLIBS)
 
 # Checks that the palloc() byte counter is wide enough; needs ~2.2GB.
 memory_test: memory_test.o
-	$(CC) $(CFLAGS) -o memory_test memory_test.o ../ladr/libladr.a -lm
+	$(CC) $(CFLAGS) -o memory_test memory_test.o ../ladr/libladr.a -lm $(LADRLIBS)
 
 # Run the regression tests (each exits nonzero on failure).
 #   strbuf_test        - String_buf semantics + the non-quadratic append
@@ -188,5 +193,5 @@ demos:
 	./demos/run.sh
 
 tptp_test: tptp_test.o
-	$(CC) $(CFLAGS) -o tptp_test tptp_test.o ../ladr/libladr.a -lm
+	$(CC) $(CFLAGS) -o tptp_test tptp_test.o ../ladr/libladr.a -lm $(LADRLIBS)
 
