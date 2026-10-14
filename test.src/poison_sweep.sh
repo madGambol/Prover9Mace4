@@ -92,10 +92,24 @@ if ! grep -aq 'deadbeef' <(strings "$build/poison/bin/prover9") 2>/dev/null; the
     exit 2
   fi
 fi
-printf '  poisoned build: %s compile lines carried -DPOISON_FREED_MEM\n' \
-  "$(grep -aE '(gcc|cc) .* -c' "$build/poison.log" | grep -ac -- -DPOISON_FREED_MEM)"
-printf '  control build:  %s (expected 0)\n' \
-  "$(grep -aE '(gcc|cc) .* -c' "$build/control.log" | grep -ac -- -DPOISON_FREED_MEM)"
+# The pattern must include g++: libladr.a has C++ translation units, and an
+# earlier version of this check matched only (gcc|cc), so it reported 137 of
+# 139 lines and looked like a partial build when the build was in fact
+# correct.  The sanitizer sweep's equivalent check REFUSES on a mismatch; this
+# one only printed, so it under-reported silently.  It asserts now.
+compile_re='(^|[[:space:]])(gcc|cc|g\+\+)[[:space:]].*[[:space:]]-c([[:space:]]|$)'
+ptotal=$(grep -acE "$compile_re" "$build/poison.log")
+ppois=$(grep -aE "$compile_re" "$build/poison.log" | grep -ac -- -DPOISON_FREED_MEM)
+ctotal=$(grep -acE "$compile_re" "$build/control.log")
+cpois=$(grep -aE "$compile_re" "$build/control.log" | grep -ac -- -DPOISON_FREED_MEM)
+printf '  poisoned build: %s of %s compile lines carried -DPOISON_FREED_MEM\n' "$ppois" "$ptotal"
+printf '  control build:  %s of %s (expected 0)\n' "$cpois" "$ctotal"
+[ "$ptotal" -gt 0 ] && [ "$ppois" = "$ptotal" ] || {
+  echo "  POISONING INCOMPLETE -- refusing to report a sweep on this build" >&2
+  exit 2; }
+[ "$cpois" = 0 ] || {
+  echo "  CONTROL IS POISONED TOO -- the comparison would prove nothing" >&2
+  exit 2; }
 
 echo
 echo "=== sweeping, $jobs at a time ==="
