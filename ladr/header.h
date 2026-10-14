@@ -22,6 +22,7 @@
 /* The most basic includes and definitions. */
 
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <limits.h>
 #include <string.h>
@@ -47,10 +48,10 @@ typedef enum { FALSE=0, TRUE=1 } BOOL;
  * -1 was.  MAX_ARITY is one below it so the two can never collide.
  */
 
-typedef unsigned short ArityType;
+typedef uint16_t ArityType;
 
-#define MAX_ARITY  ((ArityType) (USHRT_MAX - 1))   /* 65534 */
-#define ARITY_NONE ((ArityType) USHRT_MAX)         /* not an arity */
+#define MAX_ARITY  ((ArityType) (UINT16_MAX - 1))  /* 65534 */
+#define ARITY_NONE ((ArityType) UINT16_MAX)        /* not an arity */
 
 /* The quantities around variables, each named for what it is.
  *
@@ -73,9 +74,9 @@ typedef unsigned short ArityType;
  * term.h, which assert that a term really is the kind being asked about.
  */
 
-typedef int            VarNumType;
-typedef int            SymNumType;
-typedef unsigned short VarCountType;
+typedef int32_t  VarNumType;
+typedef int32_t  SymNumType;
+typedef uint16_t VarCountType;
 
 #define IMAX(a,b) ((a) > (b) ? (a) : (b))
 #define IMIN(a,b) ((a) < (b) ? (a) : (b))

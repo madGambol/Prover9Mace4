@@ -19,6 +19,8 @@
 #ifndef TP_DISCRIM_H
 #define TP_DISCRIM_H
 
+#include <stdint.h>
+
 #include "unify.h"
 #include "index.h"
 
@@ -58,7 +60,31 @@ struct discrim {       /* node in a discrimination tree */
     Discrim kids;      /* for internal nodes */
     Plist data;        /* for leaves */
   } u;
-  short symbol;        /* variable number or symbol number */
+
+  /* The node's key.  Which KIND of key depends on the `type` field below:
+
+       type == DVARIABLE   a variable number, VARNUM(t)       <= MAX_VARS
+       type == DRIGID      a SYMBOL number, SYMNUM(t)         unbounded
+       AC indexing         an argument count, num_args        <= MAX_ARITY
+
+     This was a `short`, and two of those three outgrow one.  Symbol numbers
+     come from an incrementing counter with no cap -- SYM_TAB_SIZE is the width
+     of the hash table, not a limit on symnums -- and MAX_ARITY is 65,534,
+     which does not fit in a short at all.  Assigning an int symnum to a short
+     truncates silently, and above 32,767 the value goes negative: symnum
+     40,000 reads back as -25,536.
+
+     That is not a slow degradation.  Insertion and retrieval both decide
+     whether a node for this key exists by comparing `d->symbol != key`, and a
+     truncated field never equals the untruncated local, so the term is never
+     found again -- and the delete path then reaches
+     fatal_error("discrim_bind_delete, cannot find end") and the prover EXITS.
+     Measured in test.src/discrim_test.c, which has to fork to survive it.
+
+     int32_t costs nothing: there were already five bytes of padding after the
+     short, so struct discrim is 24 bytes either way. */
+
+  int32_t symbol;      /* see above: a varnum, a symnum, or an arity */
   char type;           /* term type and for ac indexing type */
 };
 
