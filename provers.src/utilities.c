@@ -176,15 +176,15 @@ void fsym_report(Ilist fsyms, Plist clauses)
 BOOL inverse_order(Clist clauses)
 {
   Clist_pos p;
-  Ilist binary = NULL;
-  Ilist unary = NULL;
+  Ilist binary = NULL, binary_tail = NULL;
+  Ilist unary = NULL, unary_tail = NULL;
   BOOL change;
     
   for (p = clauses->first; p; p = p->next) {
     int f2, f1, f0;
     if (inverse_axiom(p->c, &f2, &f1, &f0)) {
-      binary = ilist_append(binary, f2);
-      unary = ilist_append(unary, f1);
+      binary = ilist_tail_append(binary, &binary_tail, f2);
+      unary = ilist_tail_append(unary, &unary_tail, f1);
     }
   }
   change = (unary != NULL || binary != NULL);
@@ -306,11 +306,11 @@ Given an Ilist, return the sublist that represent unary symbols.
 Ilist unary_symbols(Ilist a)
 {
   Ilist p;
-  Ilist b = NULL;
+  Ilist b = NULL, tail = NULL;
 
   for (p = a; p; p = p->next) {
     if (sn_to_arity(p->i) == 1)
-      b = ilist_append(b, p->i);
+      b = ilist_tail_append(b, &tail, p->i);
   }
   return b;
 }  /* unary_symbols */

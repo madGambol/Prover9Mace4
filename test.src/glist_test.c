@@ -94,6 +94,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <time.h>
 
 /* ------------------------------------------------------------------ */
 /* The transcript, as the recursive implementation produced it.        */
@@ -292,6 +293,104 @@ int main(void)
     printf("  expected: %.70s\n", e);
     printf("  got:      %.70s\n", g);
     failures++;
+  }
+
+  /* ---- the O(1) tail-append helpers ----
+   *
+   * A Plist is just a pointer to its first cell, so plist_append() has
+   * nowhere to keep a tail and must walk; "X = plist_append(X, v)" in a loop
+   * over the input is therefore quadratic, and the tree had 46 instances of
+   * that shape.  plist_tail_append() and friends let the caller hold the
+   * tail.  The only thing that needs checking is that they build exactly what
+   * the walking version builds -- same elements, same order -- because the
+   * whole point is that call sites can be switched over without thinking.
+   */
+  {
+    static const int V[] = { 9, 4, 4, 7, 0, -3, 12 };
+    const int len = (int) (sizeof(V) / sizeof(V[0]));
+    Ilist walked = NULL, tailed = NULL, tail = NULL;
+    Plist pw = NULL, pt = NULL, ptail = NULL;
+    I2list w2 = NULL, t2 = NULL, t2tail = NULL;
+    I3list w3 = NULL, t3 = NULL, t3tail = NULL;
+    int i, same = 1;
+
+    for (i = 0; i < len; i++) {
+      walked = ilist_append(walked, V[i]);
+      tailed = ilist_tail_append(tailed, &tail, V[i]);
+    }
+    {
+      Ilist a, b;
+      for (a = walked, b = tailed; a && b; a = a->next, b = b->next)
+	if (a->i != b->i) { same = 0; break; }
+      check("ilist_tail_append matches ilist_append element for element",
+	    same && ilist_count(walked) == len && ilist_count(tailed) == len);
+    }
+    check("ilist_tail_append leaves the tail at the last cell",
+	  tail != NULL && tail->next == NULL && tail->i == V[len - 1]);
+
+    same = 1;
+    for (i = 0; i < len; i++) {
+      pw = plist_append(pw, S[i % 5]);
+      pt = plist_tail_append(pt, &ptail, S[i % 5]);
+    }
+    {
+      Plist a, b;
+      for (a = pw, b = pt; a && b; a = a->next, b = b->next)
+	if (a->v != b->v) { same = 0; break; }
+      check("plist_tail_append matches plist_append element for element",
+	    same && plist_count(pw) == len && plist_count(pt) == len);
+    }
+
+    same = 1;
+    for (i = 0; i < len; i++) {
+      w2 = i2list_append(w2, V[i], i);
+      t2 = i2list_tail_append(t2, &t2tail, V[i], i);
+      w3 = i3list_append(w3, V[i], i, i * 2);
+      t3 = i3list_tail_append(t3, &t3tail, V[i], i, i * 2);
+    }
+    {
+      I2list a, b;
+      I3list c, d;
+      for (a = w2, b = t2; a && b; a = a->next, b = b->next)
+	if (a->i != b->i || a->j != b->j) { same = 0; break; }
+      for (c = w3, d = t3; c && d; c = c->next, d = d->next)
+	if (c->i != d->i || c->j != d->j || c->k != d->k) { same = 0; break; }
+      check("i2list_tail_append and i3list_tail_append match their walking forms",
+	    same && i2list_count(w2) == len && i2list_count(t2) == len);
+    }
+
+    /* the empty case: an empty list with a NULL tail must come back as a
+       one-element list, not be left empty */
+    {
+      Ilist e = NULL, etail = NULL;
+      e = ilist_tail_append(e, &etail, 42);
+      check("tail-append onto an empty list returns the new head",
+	    e != NULL && e->i == 42 && etail == e && e->next == NULL);
+      zap_ilist(e);
+    }
+
+    zap_ilist(walked); zap_ilist(tailed);
+    zap_plist(pw); zap_plist(pt);
+    zap_i2list(w2); zap_i2list(t2);
+    zap_i3list(w3); zap_i3list(t3);
+  }
+
+  /* ---- and that appending 400,000 times is no longer quadratic ---- */
+  {
+    const int big = 400000;
+    Ilist lst = NULL, tail = NULL;
+    clock_t t0 = clock();
+    double secs;
+    int k;
+    for (k = 0; k < big; k++)
+      lst = ilist_tail_append(lst, &tail, k);
+    secs = (double) (clock() - t0) / CLOCKS_PER_SEC;
+    printf("      400000 ilist_tail_append took %.2f s\n", secs);
+    check("400000 tail-appends under 1s (ilist_append would be quadratic)",
+	  secs < 1.0);
+    check("400000 tail-appends built the right list",
+	  ilist_count(lst) == big && lst->i == 0 && tail->i == big - 1);
+    zap_ilist(lst);
   }
 
   /* ---- stack depth: 400,000 elements, which the recursive versions could

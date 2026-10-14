@@ -439,14 +439,14 @@ void parm_handler(FILE *fout, Term t, BOOL echo, int unknown_action)
 static
 void process_symbol_list(Term t, char *command, Plist terms)
 {
-  Plist strings = NULL;
+  Plist strings = NULL, strings_tail = NULL;
   Plist p;
   for (p = terms ; p; p = p->next) {
     Term c = p->v;
     if (!CONSTANT(c))
       fatal_input_error(stdout, "Symbols in this command must not have "
 			"arguments (arity is deduced from the clauses)", t);
-    strings = plist_append(strings, sn_to_str(SYMNUM(c)));
+    strings = plist_tail_append(strings, &strings_tail, sn_to_str(SYMNUM(c)));
   }
   if (str_ident(command, "lex") || str_ident(command, "function_order"))
     Lex_function_list = plist_cat(Lex_function_list, strings);

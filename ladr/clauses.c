@@ -132,12 +132,15 @@ Given a Plist of clauses, return the subset of nonnegative clauses.
 /* PUBLIC */
 Plist nonneg_clauses(Plist clauses)
 {
-  Plist nonneg = NULL;
+  /* plist_append walks to the tail, so appending once per clause here was
+     quadratic in the clause count: 44,219 calls and 8% of startup on a
+     44,227-clause problem.  See PF9 in ../FIXES.md. */
+  Plist nonneg = NULL, tail = NULL;
   Plist p;
   for (p = clauses; p; p = p->next) {
     Topform c = p->v;
     if (!negative_clause(c->literals))
-      nonneg = plist_append(nonneg, c);
+      nonneg = plist_tail_append(nonneg, &tail, c);
   }
   return nonneg;
 }  /* nonneg_clauses */

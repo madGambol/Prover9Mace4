@@ -1873,7 +1873,7 @@ is returned.
 /* PUBLIC */
 Plist split_string(char *onlys)
 {
-  Plist p = NULL;
+  Plist p = NULL, tail = NULL;
   char *work = malloc(strlen(onlys)+1);
   int len = strlen(onlys);
   int i = 0;
@@ -1884,7 +1884,7 @@ Plist split_string(char *onlys)
       while (i < len && !white_char(onlys[i]))
 	work[j++] = onlys[i++];
       work[j] = '\0';
-      p = plist_append(p, new_str_copy(work));
+      p = plist_tail_append(p, &tail, new_str_copy(work));
     }
   }
   free(work);

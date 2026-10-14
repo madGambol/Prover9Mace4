@@ -235,6 +235,19 @@ Ilist multiset_to_set(I2list m);
 
 int multiset_occurrences(I2list m, int i);
 
+/* Appending in O(1), with the caller holding the tail.  A Plist is just a
+   pointer to its first cell, so plist_append() has nowhere to keep a tail and
+   must walk; "X = plist_append(X, v)" in a loop is therefore quadratic.  See
+   the long comment above plist_tail_append() in glist.c. */
+
+Plist plist_tail_append(Plist lst, Plist *tail, void *v);
+
+Ilist ilist_tail_append(Ilist lst, Ilist *tail, int i);
+
+I2list i2list_tail_append(I2list lst, I2list *tail, int i, int j);
+
+I3list i3list_tail_append(I3list lst, I3list *tail, int i, int j, int k);
+
 /* An accumulator for building a large multiset.
  *
  * multiset_add_n() searches the I2list for the element it is adding, so

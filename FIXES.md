@@ -49,7 +49,8 @@ defaults to `-std=gnu23`.
 | PF6 | `logic_term()` compares connective NAMES, 161M `str_ident` calls | `ladr/formula.c` | performance (found, not fixed) |
 | PF7 | `eq_defs()` accumulates dependents with `ilist_cat`, 1.07 billion cell visits | `provers.src/unfold.c` | performance |
 | PF8 | `collect_multiples()` compares every symbol name against every other | `ladr/symbols.c` | performance |
-| PF9 | `nonneg_clauses()` appends to the list it is growing | `provers.src/utilities.c` | performance (found, not fixed) |
+| PF9 | appending to a list you are growing, 14 input-scaling sites | `ladr/glist.c` +10 | performance |
+| PF10 | discrimination-tree / FPA index construction, 78%% of what remains | `ladr/discrimb.c` | performance (found, not fixed) |
 | X1–X5 | All 4 installed helper scripts are unrunnable | `utilities/` | broken tooling |
 | L1 | `demod1` drops a term its callee may have freed | `ladr/demod.c:376` | latent, reported only |
 
@@ -1705,14 +1706,104 @@ start index alongside its position removes it. The many-groups ladder above is
 what exposed that, and `arity_check_test.sh` now carries a four-group case to
 keep it exposed.
 
-### PF9 — `nonneg_clauses()` appends to a list it is growing
-`provers.src/utilities.c` — **found but not fixed**
+### PF9 — appending to a list you are growing, in 14 places
+`ladr/glist.c` and 10 other files
 
-`plist_append` is called 44 219 times from `nonneg_clauses()` — once per clause
-— and walks to the tail each time, so it is quadratic in the clause count: 8%
-of what remains on CSR040-10. The same tail-pointer fix as PF7.
+`plist_append` was called 44 219 times from `nonneg_clauses()` — once per
+clause — walking to the tail each time, so it was quadratic in the clause
+count: 8% of what remained on CSR040-10 after PF8.
 
-PF6 and PF9 are recorded rather than fixed. Both are on the input path that a
+**Why the function has to walk.** A `Plist` *is* the pointer to its first cell.
+There is no list object, no header holding `first`/`last`/`count`:
+
+```c
+typedef struct plist * Plist;
+struct plist { void *v; Plist next; };
+```
+
+So `plist_append(lst, v)` is handed only the head and has nowhere to keep a
+tail pointer even if it wanted one. The walk is forced by the representation,
+not an oversight in the function — and `plist_prepend` is O(1) for the same
+reason, since prepending needs to know nothing about the end.
+
+That is what makes it a trap: the two look equally innocent at a call site, and
+append is what you reach for whenever order matters, which is most of the time.
+A scan of the tree found **46** instances of `X = *_append(X, ...)` inside a
+loop. Four of them had already turned up as measured bottlenecks — PF2, PF3,
+PF7 and this one — which is four out of five of the performance fixes in this
+document arising from one three-line mistake.
+
+**Fix** — giving `Plist` a header struct would fix it everywhere, but `Plist`
+is passed by value and returned across 92 call sites, `Ilist` across 58, and
+`I2list`/`I3list` the same way; every signature in the library would change.
+So the tail lives with the caller, and `glist.c` gains four functions that make
+that a one-liner instead of six lines of cell plumbing repeated per site:
+
+```c
+Plist lst = NULL, tail = NULL;
+for (...)
+  lst = plist_tail_append(lst, &tail, v);
+```
+
+14 call sites are converted — every one whose loop runs over the clause list,
+the symbol table, or another input-sized collection: `nonneg_clauses`,
+`clauses_in_clist`, `all_function_symbols`, `all_relation_symbols`,
+`syms_with_lex_val`, `not_in_preliminary_precedence`, `new_symbols_since_mark`,
+`process_skolem_list`, `process_lex_list` (two lists), `split_string`, the `lex`
+command's symbol list, `unary_symbols`, `inverse_order`'s two lists, Mace4's
+input formulas, `new_syms`, and the TPTP translator's distinct-object table.
+The 32 that remain are bounded by one term, one formula's children, one
+clause's literals, or an option list, and are left alone.
+
+`test.src/glist_test.c` checks each helper builds exactly what the walking
+version builds — same elements, same order — which is the only property that
+matters, since the point is that call sites can be switched over without
+thinking. 400 000 tail-appends take 0.01 s.
+
+Measured, startup on CSR040-10, three runs each:
+
+| | |
+| --- | --- |
+| before | 8.97, 8.78, 8.74 s |
+| after | 7.70, 7.79, 7.56 s |
+
+**1.15x** — the smallest of these five fixes, because `nonneg_clauses` was 8%
+and the other converted sites are not hot on this particular input. On a ladder
+of *n* clauses the ratio grows with *n*: 1.1x at 8 000, 1.4x at 16 000, 1.4x at
+32 000, 1.6x at 64 000. The durable part is the idiom and its documentation, so
+that the next loop written over the input does not reintroduce the quadratic.
+
+Behaviour: 0 differences over the 174 comparable corpus runs, A/A floor 0.
+
+### PF10 — the discrimination-tree and FPA index construction is quadratic
+`ladr/discrimb.c`, `ladr/fpa.c` — **found but not fixed**
+
+With all five of the above fixed, CSR040-10's startup profile is **78%** index
+construction and retrieval, and nothing else is above 5%:
+
+```
+ 32.48%  discrim_bind_insert_rec        75073 calls
+ 22.87%  fpa_trie_member_insert        171176 calls
+ 14.34%  discrim_bind_retrieve_leaf     37537 calls
+  8.25%  discrim_flat_retrieve_leaf    530936 calls
+  4.33%  lookup_by_sym                5343627 calls
+  3.65%  lookup_by_id                18042855 calls
+```
+
+`lookup_by_id` is down from 1.08 billion calls to 18 million, and the call
+counts above are linear in the clause count — roughly 1.7 inserts per clause —
+so this is the indexing doing its job rather than another accidental walk. But
+it is still *quadratic in the vocabulary*: on a ladder of *n* unit clauses over
+2*n* symbols, with `predicate_elim` cleared so that PF3's remaining quadratic
+is out of the picture, startup still grows 4.2x per doubling. The cost is
+inside each insert, not in the number of them.
+
+This is the same kind of problem as PF4 was — an index whose per-item cost
+scales with the vocabulary rather than with the item — and the same kind of
+answer is likely. It is the right place for the next piece of work on scale,
+and a deeper change than any of PF2, PF3, PF7, PF8 or PF9.
+
+PF6 and PF10 are recorded rather than fixed. Both are on the input path that a
 large knowledge base takes, and every one of these was found by measuring
 something else — which is the argument for measuring before optimising, not
 after, and for re-measuring after every fix rather than reasoning about what
@@ -1734,13 +1825,15 @@ together on `Problems/CSR/CSR040-10.p` — 5.7 MB of TPTP, 44 227 clauses and
 | after PF4 part 1 (feature vector built cheaply) | 95.50 s |
 | after PF4 part 2 (feature vector made sparse) | 31.81 s |
 | after PF7 (equational-definition dependents) | 15.54 s |
-| after PF8 (symbol-name arity check) | **9.07 s** |
+| after PF8 (symbol-name arity check) | 9.07 s |
+| after PF9 (tail-append idiom, 14 sites) | **7.68 s** |
 
-**18.5x overall**, and the shape matters more than the factor: every one of
+**21.9x overall**, and the shape matters more than the factor: every one of
 these fixes removed a cost proportional to the *vocabulary*, or to the amount
 already accumulated, rather than to the work actually being done — so the gap
-widens with the size of the knowledge base. What remains is dominated by PF9
-and by the discrimination-index construction.
+widens with the size of the knowledge base. What remains is PF10, the index
+construction itself, which is 78% of the profile and still quadratic in the
+vocabulary.
 
 Note also that PF3's 106x on the synthetic ladder is 1.12x here, because most
 of this problem's predicates are not eliminable and the cubic loop barely runs.
