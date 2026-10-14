@@ -20,7 +20,21 @@
 
 /* Private definitions and types */
 
-static Ilist Feature_symbols;  /* list of featured symbols (symnums)*/
+/* The featured symbols, in the order their entries appear in every feature
+   vector.  This was an Ilist walked once per clause; it is a flat array now,
+   for two reasons.  The walk is the inner loop of features() and runs over
+   every distinct symbol in the whole input for every clause -- 7,161 symbols
+   x 37,537 clauses on one real TPTP problem -- so pointer-chasing a list of
+   one-int cells is the wrong shape; and the per-symbol "is this a function
+   symbol" question, which decides whether a symbol contributes 2 entries or
+   4, used to be asked inside that loop by calling function_symbol(), which
+   goes to the symbol table.  It does not depend on the clause, so it is
+   answered once here instead.  On the same problem that removed 821 million
+   get_symbol_type calls and the bulk of 1.08 billion lookup_by_id calls. */
+
+static int  Feature_count;     /* how many featured symbols */
+static int *Feature_symbols;   /* their symnums, in vector order */
+static char *Feature_isfunc;   /* 1 if that symbol is a function symbol */
 
 /* The following are work arrays, indexed by symnum, used for calculating
    the features of a clause.  They are allocated by init_features() and
@@ -45,11 +59,26 @@ static int *Neg_maxdepth;
 /* PUBLIC */
 void init_features(Ilist fsyms, Ilist rsyms)
 {
+  Ilist syms = ilist_cat(ilist_copy(rsyms), ilist_copy(fsyms));
+  Ilist p;
+  int i;
+
   Work_size = greatest_symnum() + 1;
 
   /* printf("init_features: size=%d\n", Work_size); */
 
-  Feature_symbols = ilist_cat(ilist_copy(rsyms), ilist_copy(fsyms));
+  /* Same symbols in the same order the Ilist had -- relation symbols then
+     function symbols -- so every feature vector is laid out exactly as
+     before. */
+  Feature_count   = ilist_count(syms);
+  Feature_symbols = calloc(Feature_count > 0 ? Feature_count : 1, sizeof(int));
+  Feature_isfunc  = calloc(Feature_count > 0 ? Feature_count : 1, sizeof(char));
+  for (p = syms, i = 0; p; p = p->next, i++) {
+    Feature_symbols[i] = p->i;
+    Feature_isfunc[i]  = function_symbol(p->i) ? 1 : 0;
+  }
+  zap_ilist(syms);
+
   Pos_occurrences = calloc(Work_size, sizeof(int));
   Neg_occurrences = calloc(Work_size, sizeof(int));
   Pos_maxdepth    = calloc(Work_size, sizeof(int));
@@ -113,34 +142,51 @@ Features:
 /* PUBLIC */
 Ilist features(Literals lits)
 {
-  Ilist f = NULL;
-  Ilist p;
+  Ilist f = NULL, tail = NULL;
   Literals lit;
+  int k;
 
-  /* Build it backwards, then reverse it. */
+  /* The original built the vector backwards with ilist_prepend and then
+     called reverse_ilist on it.  Keeping the tail builds it forwards in the
+     same order with the same number of cells and no reversing pass -- which
+     at one call per clause was 7.69 s of a 171 s run on a 37,537-clause
+     problem. */
 
-  f = ilist_prepend(f, positive_literals(lits));
-  f = ilist_prepend(f, negative_literals(lits));
+#define APPEND_FEATURE(v)			\
+  do {						\
+    Ilist g_ = get_ilist();			\
+    g_->i = (v);				\
+    g_->next = NULL;				\
+    if (tail) tail->next = g_; else f = g_;	\
+    tail = g_;					\
+  } while (0)
+
+  APPEND_FEATURE(positive_literals(lits));
+  APPEND_FEATURE(negative_literals(lits));
 
   for (lit = lits; lit; lit = lit->next) {
     fill_in_arrays(lit->atom, lit->sign, 0);
   }
 
-  for (p = Feature_symbols; p; p = p->next) {
-    f = ilist_prepend(f, Pos_occurrences[p->i]);
-    f = ilist_prepend(f, Neg_occurrences[p->i]);
+  for (k = 0; k < Feature_count; k++) {
+    int sn = Feature_symbols[k];
 
-    if (function_symbol(p->i)) {
-      f = ilist_prepend(f, Pos_maxdepth[p->i]);
-      f = ilist_prepend(f, Neg_maxdepth[p->i]);
+    APPEND_FEATURE(Pos_occurrences[sn]);
+    APPEND_FEATURE(Neg_occurrences[sn]);
+
+    if (Feature_isfunc[k]) {       /* was function_symbol(sn), per clause */
+      APPEND_FEATURE(Pos_maxdepth[sn]);
+      APPEND_FEATURE(Neg_maxdepth[sn]);
     }
 
-    Pos_occurrences[p->i] = 0;
-    Neg_occurrences[p->i] = 0;
-    Pos_maxdepth[p->i] = 0;
-    Neg_maxdepth[p->i] = 0;
+    Pos_occurrences[sn] = 0;
+    Neg_occurrences[sn] = 0;
+    Pos_maxdepth[sn] = 0;
+    Neg_maxdepth[sn] = 0;
   }
-  f = reverse_ilist(f);
+
+#undef APPEND_FEATURE
+
 #if 0
   printf("Features for clause "); f_clause(c);
   p_features(f);
@@ -161,10 +207,10 @@ Ilist features(Literals lits)
 int feature_length(void)
 {
   int n = 2;  /* pos lits, neg lits */
-  Ilist p;
-  for (p = Feature_symbols; p; p = p->next) {
+  int k;
+  for (k = 0; k < Feature_count; k++) {
     n += 2;
-    if (function_symbol(p->i))
+    if (Feature_isfunc[k])
       n += 2;
   }
   return n;
@@ -203,15 +249,15 @@ BOOL features_less_or_equal(Ilist c, Ilist d)
 /* PUBLIC */
 void p_features(Ilist f)
 {
-  Ilist p;
+  int k;
   printf("  pos_lits=%d, neg_lits=%d\n", f->i, f->next->i);
   f = f->next->next;
 
-  for (p = Feature_symbols; p; p = p->next) {
-    printf("  symbol %s: ", sn_to_str(p->i));
+  for (k = 0; k < Feature_count; k++) {
+    printf("  symbol %s: ", sn_to_str(Feature_symbols[k]));
     printf("pos_occ=%d, neg_occ=%d", f->i, f->next->i);
     f = f->next->next;
-    if (function_symbol(p->i)) {
+    if (Feature_isfunc[k]) {
       printf(", pos_max=%d, neg_max=%d", f->i, f->next->i);
       f = f->next->next;
     }
