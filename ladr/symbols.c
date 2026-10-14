@@ -3003,11 +3003,11 @@ Ilist collect_multiples(Ilist syms)
      problem reaches it. */
 
   int n = ilist_count(syms);
-  struct namepos *a;
-  struct namegroup *groups;
-  int *emitted;         /* symnums already added, to add each only once */
-  Ilist p, bad_syms = NULL;
-  int i, j, ngroups = 0, nemitted = 0;
+  struct namepos *a = NULL;
+  struct namegroup *groups = NULL;
+  int *emitted = NULL;  /* symnums already added, to add each only once */
+  Ilist p = NULL, bad_syms = NULL;
+  int i = 0, j = 0, ngroups = 0, nemitted = 0;
 
   if (n < 2)
     return NULL;

@@ -12,7 +12,7 @@ CFLAGS = $(XFLAGS) -g  -O0 -Wall
 # CFLAGS = $(XFLAGS)  -Wall -pedantic
 
 PROGRAMS = avltest strbuf_test memory_test arity_test varnum_test bool_test \
-           multiset_test glist_test features_test
+           multiset_test glist_test features_test discrim_test
 
 all: ladr apps
 
@@ -40,6 +40,12 @@ strbuf_test: strbuf_test.o
 # Checks that a BOOL holds only TRUE or FALSE; microseconds.
 bool_test: bool_test.o
 	$(CC) $(CFLAGS) -o bool_test bool_test.o ../ladr/libladr.a -lm
+
+# Checks that the discrimination index's key field is wide enough for a symbol
+# number: it was a short, which truncates above 32,767 and makes the prover
+# abort.  Needs ~40,000 symbols, so a second or two -- tier2.
+discrim_test: discrim_test.o
+	$(CC) $(CFLAGS) -o discrim_test discrim_test.o ../ladr/libladr.a -lm
 
 # Checks the sparse feature-vector index against a brute-force dense scan, in
 # both directions, on random data; under a second.
@@ -87,6 +93,7 @@ check: strbuf_test memory_test arity_test varnum_test bool_test multiset_test gl
 	./arity_check_test.sh
 	./strbuf_test
 	./memory_test
+	./discrim_test
 	./regress.sh
 	./mace4_soundness.sh
 
@@ -150,7 +157,7 @@ tier1: arity_test varnum_test bool_test multiset_test glist_test
 	./demos/run.sh
 	./tptp_semantics.sh
 
-tier2: strbuf_test memory_test tier1
+tier2: strbuf_test memory_test discrim_test tier1
 	./strbuf_test
 	./memory_test
 	./regress.sh
