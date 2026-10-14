@@ -2925,27 +2925,146 @@ void new_constant_properties(int sn)
  *
  *************/
 
+/* One entry per symbol in the list handed to collect_multiples(), so that the
+   symbols sharing a name can be found by sorting instead of by comparing
+   every pair against every other. */
+
+struct namepos {
+  char *name;
+  int sym;
+  int pos;      /* index in the original list, which fixes the output order */
+};
+
+/* Group by name; within a name, keep the original list order. */
+
+static
+int compare_namepos(const void *a, const void *b)
+{
+  const struct namepos *x = a;
+  const struct namepos *y = b;
+  int c = strcmp(x->name, y->name);
+  if (c != 0)
+    return c;
+  return x->pos < y->pos ? -1 : (x->pos > y->pos ? 1 : 0);
+}  /* compare_namepos */
+
+/* A run of entries sharing a name: where it starts in the sorted array, how
+   long it is, and where its first member sat in the original list. */
+
+struct namegroup {
+  int start;
+  int len;
+  int firstpos;
+};
+
+/* Order the groups by where each one's first member sits in the original
+   list, which is the order the pairwise loop discovered them in. */
+
+static
+int compare_group(const void *a, const void *b)
+{
+  int x = ((const struct namegroup *) a)->firstpos;
+  int y = ((const struct namegroup *) b)->firstpos;
+  return x < y ? -1 : (x > y ? 1 : 0);
+}  /* compare_group */
+
 static
 Ilist collect_multiples(Ilist syms)
 {
   /* Example: Given  (f/0, f/1, g/0, h/2), 
               return (f/0, f/1).
-  */
-  Ilist p1;
-  Ilist p2;
-  Ilist bad_syms = NULL;
-  for (p1 = syms; p1; p1 = p1->next) {
-    char *s1 = sn_to_str(p1->i);
-    for (p2 = p1->next; p2; p2 = p2->next) {
-      char *s2 = sn_to_str(p2->i);
-      if (str_ident(s1, s2)) {
-	if (!ilist_member(bad_syms, p1->i))
-	  bad_syms = ilist_prepend(bad_syms, p1->i);
-	if (!ilist_member(bad_syms, p2->i))
-	  bad_syms = ilist_prepend(bad_syms, p2->i);
+
+     This used to be an explicit all-pairs comparison: for every symbol, walk
+     every later symbol and compare the two names with str_ident().  That is
+     O(n^2) string comparisons over every symbol in the input, and on
+     Problems/CSR/CSR040-10.p it was 239,225,001 of the 263,958,220 str_ident
+     calls in the profile -- the largest single item left after PF7, and
+     enough to swamp the measurement of anything else near it.
+
+     Symbols sharing a name can be found by grouping instead, which is
+     O(n log n).  The output is identical, including its ORDER, and that
+     matters more than usual here: the caller in top_input.c turns this list
+     straight into a fatal_input_error message that names the symbols in list
+     order, so a different order is a different error message.  The order the
+     pairwise loop produced is
+
+       - groups ordered by where each group's FIRST member appears in syms,
+	 because that is the outer-loop iteration that discovered the group;
+       - within a group, members in syms order, because the inner loop runs
+	 forwards from the outer position;
+       - and the whole thing reversed, because each symbol was added with
+	 ilist_prepend.
+
+     test.src/arity_check_test.sh pins the exact message, since the corpus
+     cannot: this path is a fatal error on malformed input, so no well-formed
+     problem reaches it. */
+
+  int n = ilist_count(syms);
+  struct namepos *a;
+  struct namegroup *groups;
+  int *emitted;         /* symnums already added, to add each only once */
+  Ilist p, bad_syms = NULL;
+  int i, j, ngroups = 0, nemitted = 0;
+
+  if (n < 2)
+    return NULL;
+
+  a = malloc(n * sizeof(struct namepos));
+  for (p = syms, i = 0; p; p = p->next, i++) {
+    a[i].name = sn_to_str(p->i);
+    a[i].sym = p->i;
+    a[i].pos = i;
+  }
+  qsort(a, n, sizeof(struct namepos), compare_namepos);
+
+  /* Runs of equal name with two or more members are the groups.  Record where
+     each run starts as well as its first position -- looking the run up again
+     afterwards would be a scan per group, which is the quadratic this is
+     replacing, in a new place. */
+  groups = malloc((n / 2 + 1) * sizeof(struct namegroup));
+  for (i = 0; i < n; ) {
+    for (j = i + 1; j < n && strcmp(a[i].name, a[j].name) == 0; j++)
+      ;
+    if (j - i >= 2) {
+      groups[ngroups].start = i;
+      groups[ngroups].len = j - i;
+      groups[ngroups].firstpos = a[i].pos;
+      ngroups++;
+    }
+    i = j;
+  }
+
+  if (ngroups == 0) {
+    free(a);
+    free(groups);
+    return NULL;
+  }
+
+  qsort(groups, ngroups, sizeof(struct namegroup), compare_group);
+
+  /* Emit in discovery order, prepending as the original did, so the result
+     comes out in the original's reverse-discovery order. */
+  emitted = malloc(n * sizeof(int));
+  for (i = 0; i < ngroups; i++) {
+    int start = groups[i].start;
+    int end = start + groups[i].len;
+    for (j = start; j < end; j++) {
+      int k, seen = 0;
+      /* syms can in principle hold a symnum twice; the pairwise loop added
+	 each symbol once, so do the same.  A symnum belongs to exactly one
+	 name group, so this only ever scans within the current group. */
+      for (k = 0; k < nemitted; k++)
+	if (emitted[k] == a[j].sym) { seen = 1; break; }
+      if (!seen) {
+	emitted[nemitted++] = a[j].sym;
+	bad_syms = ilist_prepend(bad_syms, a[j].sym);
       }
     }
   }
+
+  free(a);
+  free(groups);
+  free(emitted);
   return bad_syms;
 }  /* collect_multiples */
 
