@@ -62,6 +62,7 @@ should be able to run one file and see it.
 | `perf-multiset-symbols.sh` | the symbol multiset was built, and read back, by linear search | performance |
 | `perf-predicate-elim.sh` | `predicate_elimination` recomputed its whole candidate set per symbol | performance |
 | `perf-sparse-features.sh` | the subsumption feature vector was sized by the symbol table, not the clause | performance / capability |
+| `perf-eq-defs.sh` | `eq_defs()` accumulated dependents by walking to the tail | performance |
 | `arity-ceiling.sh` | `MAX_ARITY` was 255, and the field was narrower than the parameters | wrong results / lost problems |
 
 The remaining defects in `FIXES.md` -- the `zap_flatterm` use-after-free, the
