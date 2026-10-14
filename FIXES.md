@@ -47,7 +47,9 @@ defaults to `-std=gnu23`.
 | PF4 | feature vector is sized by the symbol table, not the clause | `ladr/features.c` | performance / capability |
 | PF5 | 40 list functions recursed once per element; 10 crash at 400,000 | `ladr/glist.c` | crash at scale |
 | PF6 | `logic_term()` compares connective NAMES, 161M `str_ident` calls | `ladr/formula.c` | performance (found, not fixed) |
-| PF7 | `eq_defs()` accumulates with `ilist_cat`; 51%% of what remains | `provers.src/unfold.c` | performance (found, not fixed) |
+| PF7 | `eq_defs()` accumulates dependents with `ilist_cat`, 1.07 billion cell visits | `provers.src/unfold.c` | performance |
+| PF8 | `collect_multiples()` compares every symbol name against every other | `ladr/symbols.c` | performance (found, not fixed) |
+| PF9 | `nonneg_clauses()` appends to the list it is growing | `provers.src/utilities.c` | performance (found, not fixed) |
 | X1–X5 | All 4 installed helper scripts are unrunnable | `utilities/` | broken tooling |
 | L1 | `demod1` drops a term its callee may have freed | `ladr/demod.c:376` | latent, reported only |
 
@@ -1574,7 +1576,7 @@ it. Left alone here because it touches the formula representation that
 everything else in the tree reads, and PF3 was the larger effect.
 
 ### PF7 — `eq_defs()` accumulates dependents by walking to the tail
-`provers.src/unfold.c` — **found but not fixed**
+`provers.src/unfold.c`
 
 With the feature vector sparse, **51%** of what remains of CSR040-10 is
 `ilist_cat`, called 22 512 times from `eq_defs()`:
@@ -1587,18 +1589,96 @@ if (!ilist_member(symbols, symbol))
   symbols = ilist_append(symbols, symbol);
 ```
 
-`ilist_cat` walks the accumulated list to find its tail, so building a symbol's
-dependent list costs O(length) per definition; and `ilist_member` plus
-`ilist_append` over `symbols` is O(length) twice per definition. Both are
-quadratic in the number of equational definitions, which for a knowledge base
-is large. The fix is the same shape as PF2 and PF3 — a tail pointer, and a
-membership flag array indexed by symnum, both of which already exist in the
-tree. `plist_append` at 44 231 calls (4% and climbing) is the same pattern one
-level out.
+`ilist_cat` walks the accumulated list to find its tail, so every definition of
+a symbol walks everything already recorded for that symbol; and `ilist_member`
+plus `ilist_append` over `symbols` is O(length) twice per definition.
 
-PF6 and PF7 are recorded rather than fixed. Both are on the input path that a
-large knowledge base takes, and both were found by measuring something else —
-which is the argument for measuring before optimising, not after.
+**How bad, measured rather than assumed.** Instrumenting the loop on
+CSR040-10:
+
+| | |
+| --- | --- |
+| definitions found | 22 510 |
+| **distinct symbols being defined** | **1** |
+| length that symbol's dependent list reached | 95 234 |
+
+One symbol, 22 510 definitions, about 4.8 dependents each — so `ilist_cat`
+walked an average of ~48 000 cells 22 510 times, about **1.07 billion** cell
+visits. And all of it is discarded: those definitions are all involved in
+cycles, so `eliminate_cycles()` drops them and the run reports
+`Unfolding symbols: (none).` both before and after. The work was pure waste;
+the change is that it reaches that answer twice as fast. (With one distinct
+symbol the `ilist_member`/`ilist_append` costs were trivial *here*; they are
+fixed anyway, because nothing guarantees that shape.)
+
+**Fix** — a tail pointer per symbol (`struct symdata` gains
+`dependents_tail`), a `listed` flag per symbol instead of
+`ilist_member(symbols, ...)`, and a tail pointer for the `symbols` list.
+Nothing about the result changes: `dependents` keeps the same elements in the
+same order, duplicates across definitions included — the original concatenated
+sets without merging them, so those duplicates were already there — and
+`symbols` keeps each symbol once, in first-seen order.
+
+`eliminate_cycles()` and `insert_symbol()` were also recursive once per symbol,
+which is the PF5 hazard; both are loops now, with the same comparison sequence
+and the same insertion points.
+
+Measured, startup on CSR040-10, three runs each:
+
+| | |
+| --- | --- |
+| before | 32.42, 32.45, 31.40 s |
+| after | 15.76, 16.13, 15.71 s |
+
+**2.05x**, and `ilist_cat` leaves the profile entirely. On a ladder of *n*
+definitions of one symbol over a fixed 42-symbol vocabulary: 1.0x at 2 000,
+1.4x at 4 000, 1.7x at 8 000, 2.9x at 16 000 — the ratio growing with *n*
+being the point.
+
+One note on how that ladder had to be built, because the first attempt was
+useless. Introducing new constants per definition made the measurement
+dominated by a *different* quadratic, PF8 below, and it showed 1.0x at every
+size. Holding the vocabulary fixed is what isolates this defect.
+`test.src/demos/perf-eq-defs.sh` says so in its header.
+
+Behaviour: 0 differences over the 174 comparable corpus runs, against an A/A
+floor of 0. 8 of those runs genuinely unfold definitions and 91 of 105 run
+`eq_defs` over every clause, so the path is exercised.
+
+### PF8 — `collect_multiples()` compares every symbol name against every other
+`ladr/symbols.c` — **found but not fixed**
+
+`arity_check()`, which runs over the whole input to report symbols used with
+more than one arity, is:
+
+```c
+for (p1 = syms; p1; p1 = p1->next) {
+  char *s1 = sn_to_str(p1->i);
+  for (p2 = p1->next; p2; p2 = p2->next) {
+    char *s2 = sn_to_str(p2->i);
+    if (str_ident(s1, s2)) { ... }
+  }
+}
+```
+
+An explicit all-pairs string comparison over every symbol in the input. On
+CSR040-10 that is **239 225 001** of the 263 958 220 `str_ident` calls in the
+profile, and it is what made the first attempt at the PF7 demo unmeasurable.
+Grouping by name — sorting, or a hash keyed on the string — makes it O(n log n)
+or O(n) and reports exactly the same set.
+
+### PF9 — `nonneg_clauses()` appends to a list it is growing
+`provers.src/utilities.c` — **found but not fixed**
+
+`plist_append` is called 44 219 times from `nonneg_clauses()` — once per clause
+— and walks to the tail each time, so it is quadratic in the clause count: 8%
+of what remains on CSR040-10. The same tail-pointer fix as PF7.
+
+PF6, PF8 and PF9 are recorded rather than fixed. All are on the input path that
+a large knowledge base takes, and every one of them was found by measuring
+something else — which is the argument for measuring before optimising, not
+after, and for re-measuring after every fix rather than reasoning about what
+must now be fastest.
 
 ### Cumulative effect on a real knowledge-base-scale problem
 
@@ -1614,12 +1694,14 @@ together on `Problems/CSR/CSR040-10.p` — 5.7 MB of TPTP, 44 227 clauses and
 | after PF5 (iterative list functions) | 127.11 s |
 | after PF3 (predicate elimination) | 114.09 s |
 | after PF4 part 1 (feature vector built cheaply) | 95.50 s |
-| after PF4 part 2 (feature vector made sparse) | **31.81 s** |
+| after PF4 part 2 (feature vector made sparse) | 31.81 s |
+| after PF7 (equational-definition dependents) | **15.54 s** |
 
-**5.3x overall**, and the shape matters more than the factor: the two largest
-fixes removed costs proportional to the *vocabulary* rather than to the data,
-so the gap widens with the size of the knowledge base. What remains is
-dominated by PF7.
+**10.8x overall**, and the shape matters more than the factor: every one of
+these fixes removed a cost proportional to the *vocabulary*, or to the amount
+already accumulated, rather than to the work actually being done — so the gap
+widens with the size of the knowledge base. What remains is dominated by PF8
+and PF9.
 
 Note also that PF3's 106x on the synthetic ladder is 1.12x here, because most
 of this problem's predicates are not eliminable and the cubic loop barely runs.

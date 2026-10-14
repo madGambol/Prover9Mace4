@@ -23,6 +23,8 @@
 struct symdata {
   Term alpha, beta;
   Ilist dependents;
+  Ilist dependents_tail;  /* last cell of dependents, so appending is O(1) */
+  BOOL listed;            /* already in the `symbols` list */
   int status;
 };
 
@@ -66,24 +68,35 @@ void trace_dependents(int i, struct symdata *table)
  *
  *************/
 
+/* Drop every symbol whose status is CYCLE, in place, freeing its cell and its
+   dependent list.
+
+   This was recursive, one frame per symbol: it fixed up the tail before
+   testing the head, which reads neatly but makes the stack depth the symbol
+   count.  See PF5 in ../FIXES.md for why that is a crash rather than a style
+   question.  A forward filter removes the same symbols in the same order. */
+
 static
 Ilist eliminate_cycles(Ilist symbols, struct symdata *table)
 {
-  if (symbols == NULL)
-    return NULL;
-  else {
-    int i = symbols->i;
-    symbols->next = eliminate_cycles(symbols->next, table);
-    if (table[i].status == CYCLE) {
-      Ilist p = symbols->next;
-      free_ilist(symbols);
+  Ilist p, prev, next;
+  for (p = symbols, prev = NULL; p; p = next) {
+    next = p->next;
+    if (table[p->i].status == CYCLE) {
+      int i = p->i;
+      if (prev)
+	prev->next = next;
+      else
+	symbols = next;
+      free_ilist(p);
       zap_ilist(table[i].dependents);
       table[i].dependents = NULL;
-      return p;
+      table[i].dependents_tail = NULL;
     }
     else
-      return symbols;
+      prev = p;
   }
+  return symbols;
 }  /* eliminate_cycles */
 
 /*************
@@ -142,17 +155,24 @@ Ordertype compare_symbols(int s1, int s2, struct symdata *table)
  *
  *************/
 
+/* Insert sym before the first element it is not GREATER_THAN.  Was recursive,
+   one frame per element skipped; the comparison sequence and the insertion
+   point are unchanged. */
+
 static
 Ilist insert_symbol(Ilist syms, int sym, struct symdata *table)
 {
-  if (syms == NULL)
-    return ilist_append(NULL, sym);
-  else if (compare_symbols(sym, syms->i, table) == GREATER_THAN) {
-    syms->next = insert_symbol(syms->next, sym, table);
-    return syms;
-  }
-  else
-    return ilist_prepend(syms, sym);
+  Ilist p, prev, g;
+  for (p = syms, prev = NULL; p; prev = p, p = p->next)
+    if (compare_symbols(sym, p->i, table) != GREATER_THAN)
+      break;
+  g = get_ilist();
+  g->i = sym;
+  g->next = p;
+  if (prev == NULL)
+    return g;
+  prev->next = g;
+  return syms;
 }  /* insert_symbol */
 
 /*************
@@ -181,12 +201,35 @@ Ilist order_symbols(Ilist syms, struct symdata *table)
 static
 Ilist eq_defs(Clist clauses, int arity_limit)
 {
-  Ilist symbols = NULL;
+  Ilist symbols = NULL, symbols_tail = NULL;
   Ilist p;
   int size = greatest_symnum() + 1;
   int i;
   struct symdata *table = calloc(size, sizeof(struct symdata));
   Clist_pos cp;
+
+  /* Three costs in this loop, all of them a walk over something that the loop
+     itself is making longer, and all of them measured on
+     Problems/CSR/CSR040-10.p, which has 22,510 equational definitions:
+
+       - ilist_cat() finds the tail of table[symbol].dependents by walking it.
+	 Definitions of one symbol accumulate there, so the walk grows with
+	 every definition: 22,512 calls, 15.57 s, and 51% of the whole run
+	 once the feature-vector work in PF4 was done.  A tail pointer makes
+	 it O(1).
+
+       - ilist_member(symbols, symbol) scans the list of symbols already seen,
+	 once per definition.  table[symbol].listed answers the same question
+	 by index.
+
+       - ilist_append(symbols, symbol) then walks that list again to reach its
+	 tail.  symbols_tail removes that walk.
+
+     None of this changes the result.  dependents keeps the same elements in
+     the same order, duplicates across definitions included -- the original
+     concatenated sets without merging them and so had those duplicates too --
+     and symbols keeps each symbol once, in first-seen order. */
+
   for (cp = clauses->first; cp; cp = cp->next) {
     Topform c = cp->c;
     int rc = equational_def(c);  /* 0=no; 1=LR, 2=RL */
@@ -195,12 +238,30 @@ Ilist eq_defs(Clist clauses, int arity_limit)
       Term beta  = ARG(c->literals->atom, (rc == 1 ? 1 : 0));
       if (ARITY(alpha) <= arity_limit && ARITY(beta) > 0) {
 	int symbol = SYMNUM(alpha);
-	table[symbol].dependents = ilist_cat(table[symbol].dependents,
-					     fsym_set_in_term(beta));
+	Ilist new_deps = fsym_set_in_term(beta);
+
+	if (new_deps != NULL) {
+	  if (table[symbol].dependents_tail)
+	    table[symbol].dependents_tail->next = new_deps;
+	  else
+	    table[symbol].dependents = new_deps;
+	  table[symbol].dependents_tail = ilist_last(new_deps);
+	}
+
 	table[symbol].alpha = alpha;
 	table[symbol].beta = beta;
-	if (!ilist_member(symbols, symbol))
-	  symbols = ilist_append(symbols, symbol);
+
+	if (!table[symbol].listed) {
+	  Ilist g = get_ilist();
+	  g->i = symbol;
+	  g->next = NULL;
+	  if (symbols_tail)
+	    symbols_tail->next = g;
+	  else
+	    symbols = g;
+	  symbols_tail = g;
+	  table[symbol].listed = TRUE;
+	}
       }
     }
   }
