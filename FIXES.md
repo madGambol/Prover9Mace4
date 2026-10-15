@@ -2464,7 +2464,9 @@ whether what it says is *true*, as opposed to how much of the workload it can
 get through.
 
 **Result, against the current tree:** every 3rd problem of TPTP v9.3.1 (8,996
-of 26,990), both provers, 10 s CPU each — **17,992 runs, 0 violations.**
+of 26,990), both provers, 10 s CPU each — **17,992 runs, 0 violations.** A
+follow-up at 300 s over Prover9's 3 361 timed-out runs found no violation
+either, so 30x the budget bought 508 further answers and no unsound claim.
 
 **The detector was calibrated first, and that is not a formality.** A detector
 that cannot fire reports zero violations on a broken prover exactly as happily
@@ -2516,10 +2518,42 @@ for not being a higher-order prover. On the logic it does target the translator
 fails on 85 of 5 950.
 
 **10 s is a severe budget**, chosen because an unsound claim surfaces quickly so
-breadth beats depth for a soundness sweep. It understates capability: re-running
-only the timed-out runs at 300 s answers a further ~20% of them, at a mean of
-about 90 s each — problems that were invisible at 10 s and comfortable at 300.
-The capability figure above should be read as "at 10 s CPU", not as a ceiling.
+breadth beats depth for a soundness sweep. So the timed-out runs were then
+re-run at 300 s — only those, because a problem already answered cannot change
+its answer by being given more time, and re-running the answered 2 525 would
+have burned about six hours reproducing known results.
+
+Prover9's 3 361 re-runs completed; Mace4's 5 171 were deliberately not run.
+Most TPTP problems are theorems, so a model-finder correctly finds nothing, and
+its timeouts are largely it being right slowly — roughly five hours of machine
+time for close to no information.
+
+| | prover9 at 10 s | prover9 at 300 s | |
+| --- | ---: | ---: | --- |
+| proof found | 1 924 | 2 356 | +432 |
+| exhausted | 264 | 340 | +76 |
+| **definite answers** | 2 188 | **2 696** | +508 |
+| **share of 5 681** | 38.5% | **47.5%** | +9.0 pts |
+| combined with Mace4 | 41.4% | **50.1%** | +8.7 pts |
+
+508 problems moved from "timed out" to answered, a 15.1% conversion of the
+re-run timeouts, at a mean of about 90 s each — invisible at 10 s and
+comfortable at 300.
+
+**The conversion rate decayed as the sweep went on**, 21.4% to 16.9% to 15.1%,
+because the easy stragglers finish first in wall-clock terms and the hard ones
+accumulate. A projection made from the first 700 runs said 51%; the answer is
+47.5%. The same decay says a further 10x of budget would add much less than
+this step did, so 300 s is near the point of diminishing returns rather than a
+trend to extrapolate.
+
+**Read the two columns as different experiments.** Mace4's 5.9% is still at
+10 s and is not comparable to Prover9's 47.5%. Raw results are kept in
+`~/Projects/prover9-corpus/results/`, and
+`~/Projects/prover9-corpus/oracle_scoreboard.sh` merges a base sweep with a
+longer-limit re-run — validated by reproducing the 10 s scoreboard exactly
+before being trusted on merged data, the same discipline as calibrating the
+`UNSOUND` detector.
 
 ---
 

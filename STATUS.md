@@ -96,11 +96,19 @@ Roughly in order of expected value.
    with a usable status, 41.4% between them. Detail in `FIXES.md`, recipe in
    `~/Projects/prover9-corpus/README.md`.
 
-   A follow-up at 300 s CPU, re-running only the 8,532 runs that timed out at
-   10 s (an answered problem cannot change its answer by being given more
-   time), answers a further ~20% of them at a mean of about 90 s each. If that
-   rate holds it takes prover9 to roughly 51%. Re-run it whenever the capability
-   figure matters; the soundness conclusion does not depend on it.
+   A follow-up re-ran Prover9's 3,361 timed-out runs at 300 s — only those,
+   since an answered problem cannot change its answer by being given more
+   time. **0 violations there too**, and 508 further answers: prover9
+   **38.5% → 47.5%**, combined **41.4% → 50.1%**. Mace4's 5,171 re-runs were
+   deliberately skipped (its timeouts are overwhelmingly theorems with no model
+   to find, so ~5 h of machine time for almost no information), which means its
+   5.9% is still a 10 s figure and is **not comparable** to Prover9's.
+
+   Raw results in `~/Projects/prover9-corpus/results/`; merge and score with
+   `oracle_scoreboard.sh`. The conversion rate decayed 21.4% → 15.1% as the
+   run went on, so 300 s is near the point of diminishing returns — a further
+   10x would add much less. Mace4 at 300 s is the obvious remaining gap if a
+   like-for-like comparison is ever wanted.
 5. **Two more hand-rolled containers**, if the C++ pattern is worth continuing:
    the discrimination-tree child index and the grouping in `collect_multiples`.
    Expect ~0% speed and roughly 230 fewer lines; the case is bug surface, not
