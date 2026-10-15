@@ -130,7 +130,7 @@ check: strbuf_test memory_test arity_test varnum_test bool_test multiset_test gl
 # plainly: a script in this directory that no target invokes is documentation,
 # not a check.  The whole audit is
 #
-#   for s in *.sh; do grep -q "$s" Makefile || echo "unwired: $s"; done
+#   make audit
 #
 # (normalize_output.sh is the one legitimate exception -- it is a filter the
 # other scripts call, not a check of its own.)
@@ -151,7 +151,30 @@ check: strbuf_test memory_test arity_test varnum_test bool_test multiset_test gl
 # regression test, and that is the single mistake this suite has made most
 # often, so it is worth asserting rather than remembering.
 
-tier1: arity_test varnum_test bool_test multiset_test glist_test
+# A .sh in this directory that no target invokes is documentation, not a
+# check.  This has happened repeatedly -- determinism.sh was written, worked
+# once, and then went a month without running -- so it is asserted rather
+# than remembered.  It is a target and not a comment because being a comment
+# is the exact failure it exists to catch: it sat here as a comment, unrun,
+# while tier1's own prerequisite list was missing features_test.
+#
+# A script invoked by another script (normalize_output.sh) counts as wired.
+
+audit:
+	@missing=0; \
+	for s in *.sh; do \
+	  if grep -q "\./$$s" Makefile; then :; \
+	  elif grep -l "$$s" *.sh demos/*.sh 2>/dev/null | grep -v "^$$s$$" | grep -q .; then :; \
+	  else echo "    unwired: $$s"; missing=1; fi; \
+	done; \
+	if [ "$$missing" -ne 0 ]; then \
+	  echo "    a script no target runs is documentation, not a check"; \
+	  exit 1; \
+	fi; \
+	echo "ok:   every .sh in test.src is reached by a target"
+
+tier1: arity_test varnum_test bool_test multiset_test glist_test features_test
+	@$(MAKE) --no-print-directory audit
 	./arity_test
 	./varnum_test
 	./bool_test
@@ -159,12 +182,14 @@ tier1: arity_test varnum_test bool_test multiset_test glist_test
 	./glist_test
 	./features_test
 	./arity_check_test.sh
+	./mace4_cells_test.sh
 	./demos/run.sh
 	./tptp_semantics.sh
 
 tier2: strbuf_test memory_test discrim_test tier1
 	./strbuf_test
 	./memory_test
+	./discrim_test
 	./regress.sh
 	./mace4_soundness.sh
 	./determinism.sh 3
@@ -179,6 +204,22 @@ tier2: strbuf_test memory_test discrim_test tier1
 	    exit 1; \
 	  fi; \
 	fi
+
+# The behaviour A/B.  Needs a second build, so it cannot run from tier2, but
+# it IS a target: as a README snippet it was skipped five merges running.
+#
+#   make ab BASELINE=/path/to/other/bin      # A = ../bin, B = BASELINE
+#
+# Runs the noise floor first and stops if it is not zero, because an A/B
+# number means nothing without it.
+
+ab:
+	@if [ -z "$(BASELINE)" ]; then \
+	  echo "make ab needs BASELINE=<bin dir> to compare ../bin against"; \
+	  exit 2; \
+	fi
+	./ab.sh aa
+	B="$(BASELINE)" ./ab.sh ab
 
 tier3:
 	@if [ -z "$(CORPUS)" ]; then \
