@@ -45,6 +45,12 @@ struct cell *Cells;           /* the table of cells (dynamically allocated) */
 struct cell **Ordered_cells;  /* (pointers to) permutation of Cells */
 int First_skolem_cell;
 
+/* Bytes held by the cell tables.  They come from malloc(), not palloc(), so
+   megs_malloced() cannot see them; mace_megs() adds this in so that the
+   max_megs check covers them.  Zero whenever no table is allocated. */
+
+static CellCountType Cell_table_bytes = 0;
+
 /* Misc Variables*/
 
 int Domain_size;
@@ -340,31 +346,175 @@ void initialize_for_search(Plist clauses)
  *
  *************/
 
+static int mace_megs(void);   /* defined below; used by the max_megs check */
+
+/*************
+ *
+ *   cells_for_symbol()
+ *
+ *   Domain_size^arity, in 64-bit arithmetic, saturating just above
+ *   MAX_CELLS so that the caller can refuse an impossible table instead of
+ *   allocating a wrapped size.  int_power() returns int and saturates at
+ *   INT_MAX, which the caller then added into an int accumulator -- so
+ *   arity 31 and above wrapped silently.
+ *
+ *************/
+
 static
-void init_for_domain_size(void)
+CellCountType cells_for_symbol(int domain_size, ArityType arity)
 {
-  int i, j, nextbase, id;
-  Symbol_data s;
+  CellCountType n = 1;
+  ArityType i;
 
-  /* Give each symbol its "base" value, which is used to index cells.  */
+  for (i = 0; i < arity; i++) {
+    if (domain_size > 1 && n > MAX_CELLS / (CellCountType) domain_size)
+      return MAX_CELLS + 1;   /* over the limit; exact value does not matter */
+    n *= (CellCountType) domain_size;
+  }
+  return n;
+}  /* cells_for_symbol */
 
-  nextbase = 0;
+/*************
+ *
+ *   free_cell_tables()
+ *
+ *   Release a partially built table after init_for_domain_size() gives up.
+ *   Cells is calloc'd, so possible[] is NULL for every cell the build never
+ *   reached and free() on it is safe.  The eterms and domain terms are not
+ *   zapped here: this path is taken only when the search is being abandoned
+ *   for lack of memory, and the normal teardown in mace4n() is what zaps
+ *   them on the paths that keep searching.
+ *
+ *************/
+
+static
+void free_cell_tables(void)
+{
+  int i;
+
+  if (Cells != NULL) {
+    for (i = 0; i < Number_of_cells; i++)
+      free(Cells[i].possible);
+    free(Cells);
+    Cells = NULL;
+  }
+  free(Ordered_cells);
+  Ordered_cells = NULL;
+  free(Domain);
+  Domain = NULL;
+  Number_of_cells = 0;
+  Cell_table_bytes = 0;
+}  /* free_cell_tables */
+
+/*************
+ *
+ *   init_for_domain_size()
+ *
+ *   Given the list of (general) clauses, set up the various data
+ *   structures that will be needed for a given domain size.
+ *
+ *   Returns FALSE if the tables for this domain size cannot be built, in
+ *   which case nothing is allocated and the caller should stop searching:
+ *   a larger domain cannot need fewer cells.
+ *
+ *   WHY THIS IS GUARDED.  The cell tables are allocated with malloc(), not
+ *   palloc(), so megs_malloced() cannot see them and the max_megs check in
+ *   check_time_memory() could not bound them.  A table is
+ *   Domain_size^arity cells per symbol, so one high-arity symbol makes it
+ *   enormous, and high arities arrive without the user asking: clausifying
+ *   TPTP Problems/LCL/LCL651+1.010.p produces Skolem functions f3..f29,
+ *   whose tables total 2^30 cells -- 56 GB at domain size 2.  Upstream
+ *   totalled that in an int, never checked a malloc, and never charged the
+ *   bytes, with two measured consequences.  Under a memory limit, malloc
+ *   returned NULL and "c->id = id" dereferenced it immediately: 26 of 249
+ *   runs (10.4%) of a 300-second TPTP sweep died in SIGSEGV, none of which
+ *   had done any searching.  With no limit, the 56 GB reservation was
+ *   partly touched, which exhausted swap and left the machine unable to
+ *   fork a shell.
+ *
+ *   So the size is computed in 64-bit arithmetic, a table whose ids would
+ *   not fit in an int is refused, the bytes are charged against max_megs
+ *   before anything is committed, and every allocation is checked.
+ *
+ *************/
+
+static
+BOOL init_for_domain_size(void)
+{
+  int i, j, id;
+  CellCountType nextbase = 0;
+  CellCountType table_bytes = 0;
+  Symbol_data s = NULL;
+  int max_megs = parm(Opt->max_megs);
+
+  /* Give each symbol its "base" value, which is used to index cells, and
+     total up what the table will cost, both in 64 bits. */
+
   for (s = Symbols; s != NULL; s = s->next) {
-    s->base = nextbase;
-    nextbase += int_power(Domain_size, s->arity);
+    CellCountType n = cells_for_symbol(Domain_size, s->arity);
+    CellCountType per_cell = (s->type == RELATION
+                              ? 2 : (CellCountType) Domain_size);
+
+    if (n > MAX_CELLS || nextbase > MAX_CELLS - n) {
+      printf("\n%% Domain size %d would need more than %llu cells for the"
+             " table of %s/%u alone; cell ids are int, so this domain size"
+             " cannot be searched.\n",
+             Domain_size, (unsigned long long) MAX_CELLS,
+             sn_to_str(s->sn), (unsigned) s->arity);
+      return FALSE;
+    }
+
+    s->base = (int) nextbase;
+    nextbase += n;
+    table_bytes += n * (CellCountType) (sizeof(struct cell)
+                                        + sizeof(void *)
+                                        + per_cell * sizeof(void *));
+  }
+
+  /* Charge the table against max_megs before committing to it.  This is the
+     check upstream could not make, because these bytes never reached
+     megs_malloced(). */
+
+  if (max_megs != -1
+      && (table_bytes / (1024*1024)) + (CellCountType) mace_megs()
+           > (CellCountType) max_megs) {
+    printf("\n%% Cell tables would need %llu megabytes at domain size %d,"
+           " which exceeds max_megs (%d).\n",
+           (unsigned long long) (table_bytes / (1024*1024)),
+           Domain_size, max_megs);
+    return FALSE;
   }
 
   /* Set up the array of domain terms.  All ground terms refer to these. */
 
-  Domain = malloc(Domain_size * sizeof(void *));
+  Domain = calloc((size_t) (Domain_size > 0 ? Domain_size : 1),
+                  sizeof(void *));
+  if (Domain == NULL) {
+    printf("\n%% Out of memory for the domain terms at domain size %d.\n",
+           Domain_size);
+    free_cell_tables();
+    return FALSE;
+  }
   for (i = 0; i < Domain_size; i++)
     Domain[i] = get_variable_term(i);
-  
-  /* Set up the table of cells. */
 
-  Number_of_cells = nextbase;
-  Cells           = malloc(Number_of_cells * sizeof(struct cell));
-  Ordered_cells   = malloc(Number_of_cells * sizeof(void *));
+  /* Set up the table of cells.  calloc, not malloc: the loop below fills
+     each cell in turn, and if it runs out of memory part way through, every
+     cell it has not reached must still be safe to free. */
+
+  Number_of_cells = (int) nextbase;
+  Cells         = calloc((size_t) (Number_of_cells > 0 ? Number_of_cells : 1),
+                         sizeof(struct cell));
+  Ordered_cells = calloc((size_t) (Number_of_cells > 0 ? Number_of_cells : 1),
+                         sizeof(void *));
+  if (Cells == NULL || Ordered_cells == NULL) {
+    printf("\n%% Out of memory for %d cells at domain size %d.\n",
+           Number_of_cells, Domain_size);
+    free_cell_tables();
+    return FALSE;
+  }
+
+  Cell_table_bytes = table_bytes;   /* now mace_megs() can see them */
 
   for (id = 0; id < Number_of_cells; id++) {
     struct cell *c = Cells + id;
@@ -377,6 +527,12 @@ void init_for_domain_size(void)
     c->max_index = max_index(id, c->symbol);
     n = id_to_domain_size(id);
     c->possible = malloc(n * sizeof(void *));
+    if (c->possible == NULL) {
+      printf("\n%% Out of memory for cell %d of %d at domain size %d.\n",
+             id, Number_of_cells, Domain_size);
+      free_cell_tables();
+      return FALSE;
+    }
     for (j = 0; j < n; j++)
       c->possible[j] = Domain[j];  /* really just a flag */
   }
@@ -385,6 +541,8 @@ void init_for_domain_size(void)
   
   if (flag(Opt->negprop))
     init_negprop_index();
+
+  return TRUE;
 } /* init_for_domain_size */
 
 /*************
@@ -538,7 +696,9 @@ int possible_model(void)
 static
 int mace_megs(void)
 {
-  return (megs_malloced() - Start_megs) + (estack_bytes() / (1024*1024));
+  return (megs_malloced() - Start_megs)
+         + (estack_bytes() / (1024*1024))
+         + (int) (Cell_table_bytes / (1024*1024));
 }  /* mace_megs */
 
 /*************
@@ -741,7 +901,16 @@ int mace4n(Plist clauses, int order)
 
   Domain_size = order;
 
-  init_for_domain_size();
+  if (!init_for_domain_size()) {
+    /* The tables for this domain size cannot be built, and a larger domain
+       cannot need fewer cells, so there is nothing to be gained by going on.
+       Reported as max_megs, which is what it is: a memory limit. */
+    free_cell_tables();
+    restore_from_stack(initial_state->stack);
+    free_mstate(initial_state);
+    set_variable_style(save_style);
+    return SEARCH_MAX_MEGS;
+  }
 
   built_in_assignments();  /* Fill out equality table (and maybe others). */
 
@@ -800,6 +969,7 @@ int mace4n(Plist clauses, int order)
   }
   free(Cells);
   Cells = NULL;
+  Cell_table_bytes = 0;
 
   for (i = 0; i < Domain_size; i++)
     zap_term(Domain[i]);
