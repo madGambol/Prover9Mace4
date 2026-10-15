@@ -59,6 +59,8 @@ void init_arithmetic(void)
   Arith_sn_size = greatest_symnum() + 20;
   Arith_op_sn = calloc(Arith_sn_size, sizeof(BOOL));
   Arith_rel_sn = calloc(Arith_sn_size, sizeof(BOOL));
+  if (Arith_op_sn == NULL || Arith_rel_sn == NULL)
+    fatal_error("init_arithmetic, out of memory for the operator tables");
 
   Arith_op_sn[Sum_sn = str_to_sn("+", 2)] = TRUE;
   Arith_op_sn[Prod_sn = str_to_sn("*", 2)] = TRUE;

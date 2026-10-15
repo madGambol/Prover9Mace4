@@ -328,6 +328,8 @@ void initialize_for_search(Plist clauses)
   Sn_map_size = max+1;
 
   Sn_to_mace_sn = malloc(Sn_map_size * sizeof(void *));
+  if (Sn_to_mace_sn == NULL)
+    fatal_error("initialize_for_search, out of memory for the symbol map");
 
   for (i = 0; i < Sn_map_size; i++)
     Sn_to_mace_sn[i] = NULL;
@@ -373,6 +375,72 @@ CellCountType cells_for_symbol(int domain_size, ArityType arity)
   }
   return n;
 }  /* cells_for_symbol */
+
+/*************
+ *
+ *   negprop_bytes_for_symbol()
+ *
+ *   What init_negprop_index() will allocate for one symbol, in bytes,
+ *   saturating at a ceiling so the caller can refuse rather than wrap.
+ *
+ *   init_recurse() in negpropindex.c builds a tree of depth "arity" whose
+ *   branching factor is Domain_size+1, so it makes
+ *
+ *       sum(k = 0 .. arity-1) of (Domain_size+1)^k
+ *
+ *   calloc() calls, each for (Domain_size+1) pointers.  That grows FASTER
+ *   than the cell table it sits beside -- (d+1)^a against d^a -- and
+ *   negprop is on by default, so it is the larger of the two in practice.
+ *   An arity-15 symbol at domain size 2 is 7,174,453 nodes, 172 MB, per
+ *   tree; a function symbol gets 2*Domain_size trees, a relation 2.  It was
+ *   also wholly unaccounted and unchecked: p[i] = init_recurse(n-1) writes
+ *   through p without ever testing it, and a sweep of such runs reached a
+ *   160 GB cgroup ceiling in twenty seconds.
+ *
+ *************/
+
+#define NEGPROP_BYTE_CEILING ((CellCountType) 1 << 62)
+
+static
+CellCountType negprop_bytes_for_symbol(int domain_size, ArityType arity,
+                                       int type, int is_equality)
+{
+  CellCountType branch = (CellCountType) domain_size + 1;
+  CellCountType nodes = 0;       /* sum of branch^k, k = 0 .. arity-1 */
+  CellCountType level = 1;
+  CellCountType trees;
+  ArityType i;
+
+  if (is_equality)
+    return 0;                    /* the equality symbol is skipped */
+
+  for (i = 0; i < arity; i++) {
+    if (nodes > NEGPROP_BYTE_CEILING - level)
+      return NEGPROP_BYTE_CEILING;
+    nodes += level;
+    if (level > NEGPROP_BYTE_CEILING / branch)
+      return NEGPROP_BYTE_CEILING;
+    level *= branch;
+  }
+
+  /* A function symbol is indexed under both signs and every domain value; a
+     relation only under the positive sign, with range 2. */
+  trees = (type == FUNCTION
+           ? (CellCountType) 2 * (CellCountType) domain_size
+           : (CellCountType) 2);
+
+  if (nodes > NEGPROP_BYTE_CEILING / branch)
+    return NEGPROP_BYTE_CEILING;
+  nodes *= branch;               /* each node holds branch pointers */
+
+  if (nodes > NEGPROP_BYTE_CEILING / sizeof(void *))
+    return NEGPROP_BYTE_CEILING;
+  nodes *= (CellCountType) sizeof(void *);
+
+  if (trees != 0 && nodes > NEGPROP_BYTE_CEILING / trees)
+    return NEGPROP_BYTE_CEILING;
+  return nodes * trees;
+}  /* negprop_bytes_for_symbol */
 
 /*************
  *
@@ -469,6 +537,23 @@ BOOL init_for_domain_size(void)
     table_bytes += n * (CellCountType) (sizeof(struct cell)
                                         + sizeof(void *)
                                         + per_cell * sizeof(void *));
+
+    /* The negative-propagation index is allocated per symbol too, out of the
+       same memory and with the same lack of accounting, and it is the bigger
+       of the two.  Charge it here so one check covers both. */
+    if (flag(Opt->negprop)) {
+      CellCountType nb = negprop_bytes_for_symbol(Domain_size, s->arity,
+                                                  s->type,
+                                                  s->attribute == EQUALITY_SYMBOL);
+      if (nb >= NEGPROP_BYTE_CEILING
+          || table_bytes > NEGPROP_BYTE_CEILING - nb) {
+        printf("\n%% The negative-propagation index for %s/%u alone would"
+               " exceed any possible memory at domain size %d.\n",
+               sn_to_str(s->sn), (unsigned) s->arity, Domain_size);
+        return FALSE;
+      }
+      table_bytes += nb;
+    }
   }
 
   /* Charge the table against max_megs before committing to it.  This is the
@@ -478,10 +563,16 @@ BOOL init_for_domain_size(void)
   if (max_megs != -1
       && (table_bytes / (1024*1024)) + (CellCountType) mace_megs()
            > (CellCountType) max_megs) {
-    printf("\n%% Cell tables would need %llu megabytes at domain size %d,"
-           " which exceeds max_megs (%d).\n",
+    printf("\n%% Cell tables%s would need %llu megabytes at domain size %d,"
+           " which exceeds max_megs (%d).%s\n",
+           flag(Opt->negprop) ? " and the negprop index" : "",
            (unsigned long long) (table_bytes / (1024*1024)),
-           Domain_size, max_megs);
+           Domain_size, max_megs,
+           flag(Opt->negprop)
+             ? "  Most of that is the negprop index, which grows as"
+               " (domain+1)^arity; clear(negprop) trades search speed for a"
+               " much smaller one."
+             : "");
     return FALSE;
   }
 
@@ -1046,6 +1137,9 @@ Mace_results mace4(Plist clauses, Mace_options opt)
 {
   int n, rc;
   Mace_results results = malloc(sizeof(struct mace_results));
+
+  if (results == NULL)
+    fatal_error("mace4, out of memory for the results structure");
 
   disable_max_megs();  /* mace4 does its own max_megs check */
   Start_seconds = user_seconds();

@@ -131,22 +131,38 @@ Roughly in order of expected value.
    Raw results in `~/Projects/prover9-corpus/results/`; merge and score with
    `oracle_scoreboard.sh`. The conversion rate decayed 21.4% → 15.1% as the
    run went on, so 300 s is near the point of diminishing returns — a further
-   10x would add much less. Mace4 at 300 s is the obvious remaining gap if a
-   like-for-like comparison is ever wanted.
-5. **Two more hand-rolled containers**, if the C++ pattern is worth continuing:
+   10x would add much less.
+
+   **Mace4 at 300 s then found two real defects rather than a capability
+   figure.** At 10 s no run reaches a domain size where it matters; at 300 s
+   many do. 6% of runs were dying in `SIGSEGV` and the sweep drove a cgroup
+   to its ceiling, which turned out to be M9 and M10 — the cell table and the
+   negprop index, both unbounded, unchecked and unaccounted. Those are fixed;
+   the figure itself is still to be collected, now with
+   `oracle_sweep_resume.sh`, which recomputes the remaining work from the
+   output file and halves concurrency when the driver does not survive.
+5. **The unaccounted allocations in `ladr/`.** M9 and M10 covered
+   `mace4.src`, where every direct `malloc`/`calloc` is now checked. `ladr/`
+   has about twenty more that bypass `palloc` and so are invisible to
+   `megs_malloced()` — `features.c` sizes six arrays by `Work_size`,
+   `dollar.c` two by `Symbols_size`, `formula.c` one by `max_vars`. None is
+   exponential in an arity the way M9 and M10 were, so none can take a
+   machine down, but they are the same class and the same audit applies:
+   check the return, and charge it to the budget the program reports.
+6. **Two more hand-rolled containers**, if the C++ pattern is worth continuing:
    the discrimination-tree child index and the grouping in `collect_multiples`.
    Expect ~0% speed and roughly 230 fewer lines; the case is bug surface, not
    performance.
-6. **`max_megs` default.** `DEFAULT_MAX_MEGS` in `ladr/memory.c` is 1000, but
+7. **`max_megs` default.** `DEFAULT_MAX_MEGS` in `ladr/memory.c` is 1000, but
    Prover9 and Mace4 override it from their own parameter, still 500
    (`provers.src/search.c`, `mace4.src/msearch.c`). Raising those changes
    results on memory-bounded runs, so it is a decision rather than a fix.
-7. **`MAX_VARS`** is still 100, blocked by the `Context` arrays, the variable-ID
+8. **`MAX_VARS`** is still 100, blocked by the `Context` arrays, the variable-ID
    stride multiplier, `compress.c`'s char assumption and `MAX_BASIS`. 17 of 40
    sampled FATAL TPTP problems hit it.
-8. **A `tptp_pre.sh` shim** would rescue roughly 274 further translation
+9. **A `tptp_pre.sh` shim** would rescue roughly 274 further translation
    failures; never built.
-9. **Publication** — upstreaming to `AlgorithmicTruth/Prover9`, GPL-2 §2(a)
+10. **Publication** — upstreaming to `AlgorithmicTruth/Prover9`, GPL-2 §2(a)
    per-file notices, GitHub.
 
 ## Things that have cost real time, worth not repeating
