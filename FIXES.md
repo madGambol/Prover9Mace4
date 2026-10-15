@@ -2557,6 +2557,150 @@ before being trusted on merged data, the same discipline as calibrating the
 
 ---
 
+## M9: Mace4's cell table was unbounded, unchecked and unaccounted
+
+This one was found by its symptoms rather than by reading: a 300-second TPTP
+sweep was producing `SIGSEGV` in 6% of runs, where the same problems at 10
+seconds had produced none at all.
+
+**The structure.** Mace4 looks for a finite model by tabulating every tuple of
+every symbol. A symbol of arity *a* over a domain of size *d* needs `d^a`
+cells, and `init_for_domain_size()` allocates the whole table up front, before
+any searching:
+
+```c
+nextbase = 0;
+for (s = Symbols; s != NULL; s = s->next) {
+  s->base = nextbase;
+  nextbase += int_power(Domain_size, s->arity);   /* int */
+}
+...
+Number_of_cells = nextbase;
+Cells           = malloc(Number_of_cells * sizeof(struct cell));
+Ordered_cells   = malloc(Number_of_cells * sizeof(void *));
+
+for (id = 0; id < Number_of_cells; id++) {
+  struct cell *c = Cells + id;
+  c->id = id;                                      /* <-- NULL here */
+```
+
+Three things about that are unguarded, and they compound.
+
+1. **The total is an `int`.** `int_power()` saturates at `INT_MAX`, and the
+   caller then does `nextbase += INT_MAX`, so a symbol of arity ≥ 31 at domain
+   size 2 wraps silently and the table is allocated at a size unrelated to
+   what the loop goes on to index.
+
+2. **The `malloc` return is never checked.** The next statement is
+   `c->id = id`, so a failed allocation is a NULL dereference on the spot.
+
+3. **The bytes are invisible to `max_megs`.** The tables come from `malloc()`,
+   not `palloc()`, so `megs_malloced()` cannot see them. Mace4 even calls
+   `disable_max_megs()` with the comment *"mace4 does its own max_megs
+   check"* — and that check, `mace_megs()`, counted `palloc` and the estack
+   and therefore could not account for its single largest allocation.
+
+**High arity is not exotic input; it arrives from clausification.** Skolemising
+a formula with *n* nested quantifiers yields a function of arity *n*. TPTP
+`Problems/LCL/LCL651+1.010.p` is a modal-logic problem whose own maximum arity
+is **2**. It clausifies to Skolem functions `f3` through `f29`:
+
+```
+Number_of_cells = 1073741988      /* 2^30 + 164, at Domain_size = 2 */
+sizeof(struct cell) = 56          /* so Cells alone is 56.0 GB */
+```
+
+The arity ladder is visible in the symbol bases, one symbol per arity from 3
+to 29, each doubling the previous delta:
+
+```
+after sn=808: sn=809 arity=28 base=268435518 (delta 134217728)
+after sn=809: sn=810 arity=29 base=536870974 (delta 268435456)
+after sn=810: sn=128 arity=1  base=1073741886 (delta 536870912)
+```
+
+**Both consequences were measured on this machine.**
+
+With a memory limit in force, `malloc` returned NULL and Mace4 died in
+`SIGSEGV` — 52 of 1236 runs (4.2%) of the 300-second sweep, none of which had
+searched anything. `gdb` on a debug build put it exactly where the code says
+it must be:
+
+```
+Program received signal SIGSEGV, Segmentation fault.
+init_for_domain_size () at msearch.c:372
+372	    c->id = id;
+#0  init_for_domain_size () at msearch.c:372
+#1  mace4n (clauses=0x7ffff6479b60, order=2) at msearch.c:744
+c = 0x0
+```
+
+An `LD_PRELOAD` interposer logging failed allocations named the request:
+
+```
+FAILED malloc(60129551328) = 56.000 GB
+```
+
+With no memory limit, Linux granted the reservation and Mace4 touched enough
+of it to reach **85.5 GB resident**. A sweep of such runs exhausted all 7 GB
+of swap and left the machine unable to fork a login shell, **which cost a
+reboot**. The script driving that sweep had attributed the appetite to
+"mace4 allocates model tables outside palloc"; that was the mechanism but not
+the defect, and naming it vaguely is why it was worked around with memory
+caps for a day instead of being fixed in an hour.
+
+**The fix.** `init_for_domain_size()` now returns `BOOL`. Before allocating
+anything it totals the table in 64-bit arithmetic and refuses when either the
+count would exceed `MAX_CELLS` — so the ids would not fit the `int` that
+`struct cell` and `Number_of_cells` use — or the bytes would exceed what is
+left of `max_megs`. A new named type carries the quantity, in the house style
+beside `ArityType`:
+
+```c
+typedef uint64_t CellCountType;
+#define MAX_CELLS ((CellCountType) INT32_MAX)
+```
+
+Every allocation is then checked; `Cells` is `calloc`'d so that a failure part
+way through the fill loop leaves each unreached `possible[]` NULL and safe to
+free; and `mace_megs()` adds the table in so the ongoing check stays honest. A
+refusal reports `max_megs` and stops the search, because a larger domain
+cannot need fewer cells.
+
+Both branches give a diagnostic that says which symbol and how much:
+
+```
+% Domain size 2 would need more than 2147483647 cells for the table of p/40
+  alone; cell ids are int, so this domain size cannot be searched.
+% Cell tables would need 40960 megabytes at domain size 2, which exceeds
+  max_megs (500).
+```
+
+**Measured, pristine against fixed:**
+
+| input | pristine | fixed |
+| --- | --- | --- |
+| `LCL651+1.010`, 12 GB cap | `rc=102` SIGSEGV in 0.52 s | `rc=7` `max_megs_no`, 81920 MB reported |
+| `LCL651+1.010`, uncapped | 85.5 GB resident and climbing | refuses in milliseconds, nothing allocated |
+| arity 40, one clause | `rc=102` SIGSEGV | `rc=7`, "cell ids are int" |
+| arity 29, one clause | `rc=102` SIGSEGV | `rc=7`, "exceeds max_megs" |
+| the 8 problems that crashed the sweep, 4 GB cap | 7 of 8 SIGSEGV | **0 of 8** |
+
+`test.src/mace4_cells_test.sh` is in tier1 and asserts all of it, including
+that a table which *does* fit is still searched and still yields its model.
+It fails against the pristine baseline with `exit 102 is SIGSEGV -- the
+unguarded allocation is back`, which is what makes it a regression test.
+
+**What this says for a large-KB engine.** The table is sized by `d^arity` over the
+*symbol table*, and the arities that hurt were not in the problem — they were
+manufactured by clausification. An engine that allocates per-symbol structures
+sized by a property of the symbol will be handed symbols no human wrote, with
+properties no input file shows. Three guards, none of which needs to know
+where the symbol came from: compute the size in a type that cannot wrap, check
+the allocation, and charge it to the same budget the engine reports.
+
+---
+
 ## The gates, and the one that was a comment
 
 There are three tiers, and the third one did not exist as anything executable
@@ -2628,6 +2772,70 @@ Instrumentation verified both ways before the sweep was believed: 137 of 137
 compile lines carried `-fsanitize`, and 77 of 77 members of `libladr.a`
 reference `__asan`. The poisoned build carried `-DPOISON_FREED_MEM` on 137
 compile lines and the control on 0.
+
+### Three more gate defects, found by running the gates on a clean tree
+
+Fixing M9 meant building the suite from scratch in a fresh worktree rather
+than in a directory where previous builds had left their artefacts lying
+about. That is what exposed these; none of them could be seen in a tree that
+had been built before.
+
+- **`tier1`'s prerequisite list omitted `features_test`, which its own recipe
+  runs.** `make tier1` therefore failed on any clean checkout, and had only
+  ever worked because the binary happened to be left over from an earlier
+  build. The gate advertised 7 unit tests and could not build one of them.
+
+- **`tier2` listed `discrim_test` as a prerequisite and never ran it.** It was
+  compiled and then ignored. That test is the one that forks, because the
+  defect it covers kills the child — so it was the test most likely to be
+  silently absent and least likely to be missed.
+
+- **The audit for unwired scripts was itself only a comment.**
+
+  ```make
+  #   for s in *.sh; do grep -q "$s" Makefile || echo "unwired: $s"; done
+  ```
+
+  It was written in response to `determinism.sh` having been written, worked
+  once, and then gone a month without running — and it was put in as a
+  comment, which is the exact failure it exists to catch. While it sat there
+  unrun, `tier1`'s prerequisites were missing `features_test`. It is now
+  `make audit`, run as the first thing `tier1` does, and it exits non-zero
+  when a script is orphaned; a script invoked by another script, as
+  `normalize_output.sh` is, counts as wired. Verified both ways — clean on
+  the real tree, and failing when a copied script was dropped in.
+
+### And the A/B is a target now, with the clock rule applied at run time
+
+The A/B was the last thing in this suite still living as a shell snippet in a
+README, which is how it came to be skipped for five merges. It is
+`test.src/ab.sh` and `make ab BASELINE=…`.
+
+It also no longer trusts `comparable.txt` to say which runs are comparable. It
+decides **after** running a pair, by looking for a clock in the exit banner.
+That list was built by running each pair and keeping those that did not stop
+on a timer, which cannot work as a static property: whether a problem
+finishes inside its limit depends on how loaded the machine is. Re-run while a
+64-job sweep was in flight, `SYN551+2` and `SET667+3` both exit
+`max_seconds` — and both then differ against **themselves**, an A/A
+difference with no second build involved:
+
+```
+SYN551+2   run1  same     SET667+3   run1  DIFF
+SYN551+2   run2  DIFF     SET667+3   run2  DIFF
+SYN551+2   run3  DIFF     SET667+3   run3  DIFF
+```
+
+With the rule applied where the fact is known, both passes come out clean and
+say what they skipped:
+
+```
+--- aa: 173 same, 0 differing, 1 skipped (clock-limited) ---
+--- ab: 173 same, 0 differing, 1 skipped (clock-limited) ---
+```
+
+A memory ceiling is *not* a clock: `exit (max_megs)` is determined by the
+input and is exactly the kind of difference this gate should catch.
 
 ---
 

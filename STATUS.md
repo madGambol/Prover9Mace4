@@ -45,7 +45,23 @@ cd test.src
 make tier1                                                  # ~2 s
 make tier2 BASELINE=/path/to/pristine-plus-build-fixes/bin   # ~3 min
 make tier3 CORPUS=~/Projects/prover9-corpus/files.txt        # ~15 min
-# then the A/B, below
+make ab   BASELINE=/path/to/previous/bin                     # ~20 min
+```
+
+Build the suite in a **fresh worktree**, not in a tree that has been built
+before. That is what exposed `tier1` failing on a clean checkout — its
+prerequisites omitted `features_test`, which its recipe runs, so it had only
+ever worked because the binary was left over. `tier2` was building
+`discrim_test` and never running it, and the audit meant to catch exactly this
+was itself only a Makefile comment. All three are fixed; `make audit` is a
+target now and `tier1` runs it first. Note the Makefiles are **not**
+parallel-safe: `make -j` races in `install` and leaves a *file* named `bin`
+where the directory belongs, after which every later build fails.
+
+The pristine-plus-build-fixes baseline for `BASELINE=` is commit `7f94204`:
+
+```sh
+git worktree add --detach /tmp/base 7f94204 && (cd /tmp/base && make all)
 ```
 
 `tier2`'s `BASELINE=` is not optional in spirit: it asserts that at least 30 of
@@ -53,15 +69,23 @@ the 41 defect tests still **fail** against the unfixed code. A test that passes
 on the unfixed code proves nothing, and that is the single mistake this suite
 has made most often.
 
-**The A/B is the gate that matters most and is the easiest to skip.** Build the
-previous commit, run every pair in `~/Projects/prover9-corpus/comparable.txt`
-under both binaries, pipe each through `test.src/normalize_output.sh`, and
-compare. Run **A/A first** — the same binary against itself — because an A/B
-number is meaningless without the noise floor.
+**The A/B is the gate that matters most and is the easiest to skip.** It is
+`make ab BASELINE=<bin>` — `test.src/ab.sh` — and it runs **A/A first**, the
+same binary against itself, because an A/B number is meaningless without the
+noise floor. It stops if the floor is not zero.
 
-Expect A/A = 0 and A/B = 2. The two are `ALG033+1` and `ALG043+1`, the only
-corpus problems that terminate *by* exhausting `max_megs`, so any change in
-allocation moves them; both must still reach `exit (max_megs)`.
+It no longer trusts `comparable.txt` to say which pairs are comparable; it
+decides after running each one, by looking for a clock in the exit banner.
+Whether a problem finishes inside its limit **depends on machine load**, so
+that cannot be a static property: re-run while a 64-job sweep was in flight,
+`SYN551+2` and `SET667+3` both exit `max_seconds` and then differ against
+*themselves*. A memory ceiling is not a clock — `exit (max_megs)` is
+input-determined and is exactly what this gate should catch.
+
+Expect A/A = 0 differing and A/B = 0 differing, with any clock-limited pairs
+reported as skipped. `ALG033+1` and `ALG043+1` are the only corpus problems
+that terminate *by* exhausting `max_megs`, so a change in allocation moves
+them; both must still reach `exit (max_megs)`.
 
 This is not belt-and-braces. Tier2 passed green on a build that had silently
 **lost three proofs** (`SWC258+1`, `SET667+3`, `olsax2`); the A/B is what found

@@ -166,6 +166,23 @@ enum {
    we can quickly get to the corresponding cell.
 */
 
+/* CellCountType: how many cells a Mace4 function or relation table holds.
+
+   A symbol's table has Domain_size^arity cells, so the count outgrows 32
+   bits at very modest arities -- 2^31 is reached by an arity-31 symbol at
+   domain size 2, and MAX_ARITY is 65534.  The count is therefore computed
+   in 64 bits so that a table too large to be built can be recognised and
+   refused, rather than wrapping an int and allocating a wrong size.
+
+   Cell *ids* are int (struct cell's "id" field, and Number_of_cells), so a
+   table can only actually be indexed when its cell count fits in MAX_CELLS.
+   A domain size needing more than that is refused rather than searched.
+*/
+
+typedef uint64_t CellCountType;
+
+#define MAX_CELLS ((CellCountType) INT32_MAX)
+
 struct cell {
   int id;
   Term eterm;          /* the term representation, e.g., f(2,3) */
