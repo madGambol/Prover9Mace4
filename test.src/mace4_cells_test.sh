@@ -140,6 +140,64 @@ else
   fail=$((fail + 1))
 fi
 
+# (c2) The negative-propagation index, which is the bigger of the two.
+#
+#      init_recurse() in negpropindex.c builds a tree of depth "arity" whose
+#      branching factor is Domain_size+1, so it allocates (d+1)^a pointers --
+#      growing faster than the cell table's d^a -- and negprop is on by
+#      default.  It was unaccounted and unchecked in the same way:
+#      "p[i] = init_recurse(n-1)" writes through p without testing it.
+#
+#      This was found only after the cell-table guard was already merged: a
+#      sweep relaunched with that fix still reached a 160 GB cgroup ceiling
+#      in twenty seconds, and 21 of 50 runs still died in SIGSEGV.  Measured
+#      with the guard in place, these are what the refused runs actually
+#      wanted: LCL655+1.015 23.7 GB, ANA009-1 35.5 GB, SWV482+2 79.9 GB,
+#      LCL659+1.020 559 GB, NLP229-10 1,436 GB.
+#
+#      An arity-15 relation at domain size 2 is (3^15-1)/2 = 7,174,453 nodes
+#      of 3 pointers each, twice over: 344 MB, against a cell table for the
+#      same symbol of 32,768 cells, about 2.4 MB.  That ratio of 140x is the
+#      point -- with negprop uncounted the cell-table check passes easily and
+#      the run still exhausts memory.
+{
+  echo 'assign(max_megs,20).'
+  echo 'formulas(sos).'
+  printf 'r(%s).\n' "$(args 15)"
+  echo 'end_of_list.'
+} > "$tmp/np.in"
+out=$tmp/npout
+"$MACE4" -f "$tmp/np.in" > "$out" 2>&1
+rc=$?
+if [ "$rc" -eq 7 ] && grep -q 'negprop index' "$out"; then
+  echo "ok:   negprop index is counted and names itself in the refusal"
+elif [ "$rc" -eq 102 ]; then
+  echo "FAIL: exit 102 is SIGSEGV -- the negprop index is unguarded again"
+  fail=$((fail + 1))
+else
+  echo "FAIL: negprop index not accounted (exit $rc, expected 7 naming negprop)"
+  fail=$((fail + 1))
+fi
+
+#      And clearing negprop must actually leave a searchable problem, or the
+#      advice the refusal prints would be wrong.
+{
+  echo 'assign(max_megs,20).'
+  echo 'assign(max_seconds,5).'
+  echo 'clear(negprop).'
+  echo 'formulas(sos).'
+  printf 'r(%s).\n' "$(args 15)"
+  echo 'end_of_list.'
+} > "$tmp/np2.in"
+"$MACE4" -f "$tmp/np2.in" > "$tmp/np2out" 2>&1
+rc=$?
+if [ "$rc" -ne 7 ] && [ "$rc" -ne 102 ]; then
+  echo "ok:   clear(negprop) leaves the same problem searchable (exit $rc)"
+else
+  echo "FAIL: clear(negprop) did not help (exit $rc); the refusal's advice is wrong"
+  fail=$((fail + 1))
+fi
+
 # (d) A table that does fit must still be searched exactly as before, or the
 #     guard has broken ordinary model finding.  Two unary predicates over a
 #     domain of 2 is 4 cells; Mace4 must find a model and exit 0.

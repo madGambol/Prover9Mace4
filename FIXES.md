@@ -2701,6 +2701,108 @@ the allocation, and charge it to the same budget the engine reports.
 
 ---
 
+## M10: the negprop index, the same defect one allocator over
+
+M9 was merged, `bin/` was rebuilt, and the sweep relaunched with the fixed
+binary — and it reached a **160 GB cgroup ceiling in twenty seconds**, with
+**21 of 50 runs still dying in `SIGSEGV`**. The cell table was bounded and the
+blow-up had not moved.
+
+**It was next door.** `negpropindex.c` builds the negative-propagation index
+with the same shape of bug, in an allocator M9 never touched:
+
+```c
+void *init_recurse(int n)
+{
+  if (n == 0) return NULL;
+  else {
+    void **p;
+    int i;
+    p = calloc(Domain_size+1, sizeof(void *));
+    for (i = 0; i < Domain_size+1; i++)
+      p[i] = init_recurse(n-1);     /* writes through p without testing it */
+    return p;
+  }
+}
+```
+
+A tree of depth `arity` with branching factor `Domain_size+1`. That is
+`(d+1)^a` pointers, which grows **faster than the cell table's `d^a`** — and
+`negprop` defaults to `TRUE` (`msearch.c:157`), so in practice it is the
+larger of the two, not the smaller. Three unchecked `calloc`s in
+`init_negprop_index()` on top of the one above, and none of the bytes
+accounted.
+
+An arity-15 relation at domain size 2 is `(3^15−1)/2` = 7,174,453 nodes of 3
+pointers each, twice over: **344 MB**, against a cell table for the same
+symbol of 32,768 cells, about 2.4 MB. A ratio of 140x. With negprop uncounted
+the cell-table check passes easily and the run still exhausts memory, which is
+exactly what the relaunch demonstrated.
+
+**What the refused runs actually wanted**, measured with the guard in place:
+
+| problem | requested | was |
+| --- | ---: | --- |
+| `LCL655+1.015` | 23.7 GB | SIGSEGV |
+| `LCL639+1.015` | 25.7 GB | SIGSEGV |
+| `ANA009-1` | 35.5 GB | SIGSEGV |
+| `SWV482+2` | 79.9 GB | SIGSEGV |
+| `LCL659+1.020` | **559 GB** | SIGSEGV |
+| `NLP229-10` | **1,436 GB** | SIGSEGV |
+
+All six now refuse with a peak RSS of **0.00 GB**.
+
+**The fix** charges the negprop index in the same up-front loop as the cell
+table, so one check covers both and the refusal still happens before anything
+is allocated, and adds the missing NULL checks so that an actual exhaustion
+reports through `fatal_error` instead of writing through NULL.
+
+Because negprop is an *optimisation* rather than a necessity, the refusal says
+so and names the lever:
+
+```
+% Cell tables and the negprop index would need 23716 megabytes at domain
+  size 2, which exceeds max_megs (2000).  Most of that is the negprop index,
+  which grows as (domain+1)^arity; clear(negprop) trades search speed for a
+  much smaller one.
+```
+
+That advice is asserted, not assumed: `mace4_cells_test.sh` checks that the
+same input which is refused by default **is** searchable under
+`clear(negprop)`. Refusing rather than silently disabling negprop keeps the
+property that matters for reproducibility — same input and same `max_megs`
+gives the same result — while leaving the choice with the user.
+
+**The lesson, which cost a second sweep to learn.** M9's write-up said the
+defect was that Mace4 "allocates outside `palloc`, so `max_megs` cannot see
+it". That was true, and fixing it for the one allocator that had been
+*measured* left the identical defect in the one that had not. When the finding
+is "this program has allocations the accounting cannot see", the fix is to
+enumerate **all** of them, not to bound the one in the backtrace:
+
+```
+$ grep -rn 'malloc\|calloc\|realloc' mace4.src/*.c
+estack.c:48        arithmetic.c:60,61     msearch.c:324,359,366,367,379,878
+negpropindex.c:62,84,87,96
+```
+
+That list was in hand when M9 was written — it is in this document — and only
+the `msearch.c` entries were acted on, because those were the ones the
+backtrace named.
+
+### The discrimination profile of the test
+
+Worth recording because it is what makes the test worth having. The same
+script, run against three builds:
+
+| build | result |
+| --- | --- |
+| pristine `7f94204` | **3 failures** — both cell-table cases and the negprop case |
+| M9 only | **1 failure** — the negprop case, precisely |
+| M9 + M10 | all pass |
+
+---
+
 ## The gates, and the one that was a comment
 
 There are three tiers, and the third one did not exist as anything executable

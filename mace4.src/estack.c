@@ -44,8 +44,11 @@ Estack get_estack(void)
   Estack p;
 
   Estack_gets++;
-  if (Estack_avail == NULL)
+  if (Estack_avail == NULL) {
     p = malloc(sizeof(struct estack));
+    if (p == NULL)
+      fatal_error("get_estack, out of memory");
+  }
   else {
     Estack_avails--;
     p = Estack_avail;

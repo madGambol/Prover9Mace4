@@ -57,9 +57,17 @@ void *init_recurse(int n)
   if (n == 0)
     return NULL;
   else {
-    void **p;
+    void **p = NULL;
     int i;
     p = calloc(Domain_size+1, sizeof(void *));
+    /* This tree has (Domain_size+1)^n nodes, so it is the largest thing
+       Mace4 allocates -- bigger than the cell table beside it.  The size is
+       checked against max_megs up front in init_for_domain_size(), which is
+       what should keep us out of here; if we arrive anyway, say so instead
+       of writing through the NULL on the next line, which is how this was
+       reported as a SIGSEGV with no searching done. */
+    if (p == NULL)
+      fatal_error("init_recurse, out of memory for the negprop index");
     for (i = 0; i < Domain_size+1; i++)
       p[i] = init_recurse(n-1);  /* assign a void** to a void* */
     return p;
@@ -82,9 +90,13 @@ void init_negprop_index(void)
     num_syms++;
 
   Index = calloc(2, sizeof(void *));
+  if (Index == NULL)
+    fatal_error("init_negprop_index, out of memory");
 
   for (sign = 0; sign < 2; sign++) {
     Index[sign] = calloc(num_syms, sizeof(void *));
+    if (Index[sign] == NULL)
+      fatal_error("init_negprop_index, out of memory for the symbol row");
 
     for (sym = 0, p = Symbols; sym < num_syms; sym++, p = p->next) {
       /* Do nothing if this is the equality symbol. */
@@ -94,6 +106,8 @@ void init_negprop_index(void)
 
 	int range_size = (p->type == FUNCTION ? Domain_size : 2);
 	Index[sign][sym] = calloc(range_size, sizeof(void *));
+	if (Index[sign][sym] == NULL)
+	  fatal_error("init_negprop_index, out of memory for a symbol's range");
 
 	for (val = 0; val < range_size; val++) {
 	  Index[sign][sym][val] = init_recurse(p->arity);
