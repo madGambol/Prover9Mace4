@@ -184,8 +184,14 @@ void *get_cmem(unsigned n)
   else {
     void **p = NULL;
     BUMP_MEM_CALLS;
-    if (n >= MAX_MEM_LISTS)
-      return calloc(n, BYTES_POINTER);
+    if (n >= MAX_MEM_LISTS) {
+      /* See get_mem(): charged and checked for the same reasons. */
+      p = calloc(n, BYTES_POINTER);
+      if (p == NULL)
+        fatal_error("get_cmem, out of memory");
+      charge_external_mem((size_t) n * BYTES_POINTER);
+      return p;
+    }
     else if (M[n] == NULL)
       p = palloc(n * BYTES_POINTER);
     else {
@@ -222,8 +228,18 @@ void *get_mem(unsigned n)
   else {
     void **p = NULL;
     BUMP_MEM_CALLS;
-    if (n >= MAX_MEM_LISTS)
+    if (n >= MAX_MEM_LISTS) {
+      /* Blocks this big bypass palloc, so megs_malloced() cannot see them
+         and max_megs could not bound them -- the same defect that let Mace4
+         ask for 56 GB while reporting a 2 GB ceiling (M9).  Charge them to
+         the external total, which megs_malloced() includes and
+         charge_external_mem() enforces, and check the result rather than
+         handing NULL back to a caller that will dereference it. */
       p = malloc(n * BYTES_POINTER);
+      if (p == NULL)
+        fatal_error("get_mem, out of memory");
+      charge_external_mem((size_t) n * BYTES_POINTER);
+    }
     else if (M[n] == NULL)
       p = palloc(n * BYTES_POINTER);
     else {
@@ -254,8 +270,11 @@ void free_mem(void *q, unsigned n)
   else {
     /* put it on the appropriate avail list */
     void **p = q;
-    if (n >= MAX_MEM_LISTS)
+    if (n >= MAX_MEM_LISTS) {
+      /* Charged by get_mem()/get_cmem(); keep the pair symmetric. */
+      discharge_external_mem((size_t) n * BYTES_POINTER);
       free(p);
+    }
     else {
 #ifdef POISON_FREED_MEM
       /* Everything but the avail-list link; see POISON above. */
@@ -322,7 +341,13 @@ has obtained from the operating system by malloc();
 /* PUBLIC */
 int megs_malloced(void)
 {
-  return Malloc_calls * MALLOC_MEGS;
+  /* Bytes_external holds what was allocated outside palloc but charged:
+     the C++ containers behind I2accum and lookup_by_id, and blocks of
+     MAX_MEM_LISTS pointers or more from get_mem()/get_cmem().  Leaving it
+     out meant this figure, the "Total malloced" line built from it, and
+     Mace4's own max_megs check were all blind to it. */
+  return Malloc_calls * MALLOC_MEGS
+         + (int) (Bytes_external / (1024 * 1024));
 }  /* megs_malloced */
 
 /*************
