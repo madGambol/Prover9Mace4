@@ -88,13 +88,19 @@ Roughly in order of expected value.
    `predicate_elim` cleared so PF3's remaining round-per-symbol loop is out of
    the picture. Nothing in the current profile explains it; it needs
    instrumenting rather than guessing.
-4. **The TPTP soundness oracle has not been run this session.** The harness is
-   `~/Projects/TPTP/results-prover9mace4/cap2_one.sh`, which already emits
-   `UNSOUND` when Prover9 proves a `Satisfiable`/`CounterSatisfiable` problem or
-   Mace4 models a `Theorem`/`Unsatisfiable` one. Point `BIN_DIR` at the current
-   build and sweep a stratified sample of `~/Projects/TPTP/TPTP-v9.3.1`. For a
-   theorem prover this is the check that matters most, and ten merges have
-   landed without it.
+4. ~~The TPTP soundness oracle has not been run.~~ **Done.** Every 3rd
+   problem of TPTP v9.3.1, both provers, 10 s CPU: **17,992 runs, 0
+   violations**, with the detector calibrated against a deliberately
+   mislabelled problem first so that a clean result means something. Capability
+   alongside it: prover9 38.5% and mace4 5.9% of the 5,681 first-order problems
+   with a usable status, 41.4% between them. Detail in `FIXES.md`, recipe in
+   `~/Projects/prover9-corpus/README.md`.
+
+   A follow-up at 300 s CPU, re-running only the 8,532 runs that timed out at
+   10 s (an answered problem cannot change its answer by being given more
+   time), answers a further ~20% of them at a mean of about 90 s each. If that
+   rate holds it takes prover9 to roughly 51%. Re-run it whenever the capability
+   figure matters; the soundness conclusion does not depend on it.
 5. **Two more hand-rolled containers**, if the C++ pattern is worth continuing:
    the discrimination-tree child index and the grouping in `collect_multiples`.
    Expect ~0% speed and roughly 230 fewer lines; the case is bug surface, not

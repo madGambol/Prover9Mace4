@@ -2453,6 +2453,76 @@ not the 4%.
 
 ---
 
+## The soundness oracle
+
+The TPTP library carries a declared SZS status for most of its problems, which
+makes it a labelled oracle rather than just a workload: a prover that reports a
+proof of a `Satisfiable` or `CounterSatisfiable` problem, or a model of a
+`Theorem`, `Unsatisfiable` or `ContradictoryAxioms` one, has contradicted the
+library and is unsound. For a theorem prover this is the only check that asks
+whether what it says is *true*, as opposed to how much of the workload it can
+get through.
+
+**Result, against the current tree:** every 3rd problem of TPTP v9.3.1 (8,996
+of 26,990), both provers, 10 s CPU each — **17,992 runs, 0 violations.**
+
+**The detector was calibrated first, and that is not a formality.** A detector
+that cannot fire reports zero violations on a broken prover exactly as happily
+as on a correct one, and this project has already been caught by a check that
+could not fail: an early sanitizer sweep was believed on the strength of a
+positive control that exercised a directory the flags had not reached. So
+before the clean result was accepted, `GRP001-1.p` — unsatisfiable, proved in
+about 110 ms — was copied with its header relabelled `Satisfiable`, making that
+proof a contradiction of the stated status. The oracle reported `UNSOUND`, as
+it must. The recipe is in `~/Projects/prover9-corpus/README.md`.
+
+One detail that nearly produced a useless control: the relabelled copy sat
+outside the TPTP tree, so its `include('Axioms/...')` did not resolve and the
+run reported `translate-fail` instead of a verdict. A control that fails to
+load proves nothing, and it fails *quietly*. The `Axioms` symlink is part of
+the recipe for that reason.
+
+### Capability, measured alongside
+
+Not the point of the sweep, but it comes free. Restricted to the first-order
+problems, which is the logic LADR targets:
+
+| | prover9 | mace4 |
+| --- | ---: | ---: |
+| problems with a usable SZS status | 5 681 | 5 681 |
+| proof found | 1 924 | 0 |
+| model found | 0 | 337 |
+| search space exhausted | 264 | 0 |
+| **definite answers** | **2 188 (38.5%)** | **337 (5.9%)** |
+| out of time (10 s CPU) | 3 361 | 5 171 |
+| failed to translate | 85 | 85 |
+
+At least one of the two answered 2 350 of 5 681, or 41.4%.
+
+**The denominator is the part worth getting right,** and the first cut of it
+here was wrong. Counting all 8,996 sampled problems gives a translate-failure
+rate of a third, which looks like a translator defect. Broken down by dialect
+it is nothing of the kind:
+
+| dialect | translate-fail | of | rate |
+| --- | ---: | ---: | ---: |
+| other (THF, TFF) | 2 862 | 3 046 | **94.0%** |
+| FOF | 82 | 3 125 | 2.6% |
+| CNF | 3 | 2 825 | **0.1%** |
+
+The 2 862 are higher-order and typed problems, outside an untyped first-order
+prover's logic entirely. Scoring them as failures would be marking Prover9 down
+for not being a higher-order prover. On the logic it does target the translator
+fails on 85 of 5 950.
+
+**10 s is a severe budget**, chosen because an unsound claim surfaces quickly so
+breadth beats depth for a soundness sweep. It understates capability: re-running
+only the timed-out runs at 300 s answers a further ~20% of them, at a mean of
+about 90 s each — problems that were invisible at 10 s and comfortable at 300.
+The capability figure above should be read as "at 10 s CPU", not as a ceiling.
+
+---
+
 ## The gates, and the one that was a comment
 
 There are three tiers, and the third one did not exist as anything executable
