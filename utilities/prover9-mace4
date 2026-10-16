@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
 
+# CHANGE NOTICE (GPL-2, section 2a): this file was modified by Chris Arena on
+# 2026-10-11, and is not as William McCune released it in LADR-2009-11A. What
+# changed and why is in FIXES.md; this file's own diff against the unmodified
+# release is
+#
+#     git diff 25b4505 -- utilities/prover9-mace4
+
 # This script takes a Prover9 input file and runs Prover9 and Mace4
 # in parallel.  If the one that finishes first finished with success,
 # its output is sent to stdout of this process.

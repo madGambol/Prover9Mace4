@@ -1,6 +1,11 @@
-/*  Copyright (C) 2006, 2007 William McCune
+/*  Copyright (C) 2026 Chris Arena
 
     This file is part of the LADR Deduction Library.
+
+    NEW IN THIS TREE, AND NOT PART OF LADR-2009-11A: William McCune did
+    not write this file.  It was written for the audit of his release that
+    FIXES.md describes, and carries the library's licence so that it can
+    be distributed with it.
 
     The LADR Deduction Library is free software; you can redistribute it
     and/or modify it under the terms of the GNU General Public License,

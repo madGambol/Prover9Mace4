@@ -16,6 +16,14 @@
     Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
 */
 
+/*  CHANGE NOTICE (GPL-2, section 2a): this file was modified by Chris Arena
+    on 2026-10-11 through 2026-10-14, and is not as William McCune released it
+    in LADR-2009-11A. What changed and why is in FIXES.md; this file's own
+    diff against the unmodified release is
+
+        git diff 25b4505 -- ladr/symbols.c
+*/
+
 #include "symbols.h"
 
 /* Private definitions and types*/
