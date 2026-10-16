@@ -2927,6 +2927,88 @@ under it carries the error silently.
 
 ---
 
+## M12: `max_megs` was not enforced before the first search node
+
+The fourth and last instance, and the one that most directly explains the
+reboot. Found while checking something else: the 300-second sweep's `FATAL`
+rows were re-run to confirm that none of them came from the `fatal_error`
+calls M9–M11 had added. None did. But 38 of the 59 said this:
+
+```
+Fatal error:  palloc, operating system is out of memory
+```
+
+That is not `max_megs`. These runs were given `assign(max_megs, 2000)` and
+died at a 12 GB address-space cap instead, and every one of them died during
+`DOMAIN SIZE n`, **before searching**.
+
+**Why.** Mace4 opens with
+
+```c
+disable_max_megs();  /* mace4 does its own max_megs check */
+```
+
+and its own check lives in `check_time_memory()`, which is called from the
+top of `search()`. But `mace4n()` does a great deal of work before `search()`
+is ever reached — `generate_ground_clauses()` instantiates every clause over
+the domain, three passes, units first — and that is precisely where a large
+domain size explodes. With LADR's check disabled for the whole run and
+Mace4's own check not yet reachable, those allocations had **no ceiling but
+the operating system's**.
+
+So the shape is the same as M9, M10 and M11, in the fourth of four places: the
+program had a memory limit, reported it, and did not apply it to the
+allocation that mattered.
+
+**The fix** keeps Mace4's own check — it counts the estack and the cell
+tables that `palloc` cannot see — and stops switching LADR's off:
+
+```c
+set_max_megs(parm(opt->max_megs));
+set_max_megs_proc(mace4_max_megs_exit);
+```
+
+Whichever ceiling is reached first wins, and both report `max_megs`.
+`SWW913+1`, the typical case:
+
+| | before | after |
+| --- | --- | --- |
+| outcome | `palloc, operating system is out of memory` | `exit (max_megs_no)` |
+| peak RSS | grew to the 12 GB cap | **2.37 GB**, against a 2000 MB ceiling |
+| diagnostic | none | names ground-clause generation and the domain size |
+
+Uncapped, and forty-eight wide, that unbounded growth is the machine-killer.
+M9 and M10 closed the other two routes to it; this was the last live one.
+
+**Two mistakes made getting here**, both caught by running the thing rather
+than reasoning about it, and both worth recording because they are generic:
+
+- **An out-of-memory handler must disarm itself before it reports.** This one
+  is called from inside `palloc`, so its own `printf` and the statistics in
+  `mace4_exit()` allocate, re-enter it, and recurse until the stack is gone.
+  The first version turned every affected run into a `SIGSEGV` — strictly
+  worse than the defect it replaced. It now sets a flag, calls
+  `disable_max_megs()`, and if re-entered anyway `_exit()`s without touching
+  the allocator at all.
+
+- **Read the initialisation order before moving a call.** The call initially
+  sat exactly where `disable_max_megs()` had been, which is *before*
+  `Opt = opt`, so `parm(Opt->max_megs)` dereferenced a null `Opt` and **every**
+  Mace4 run died in `SIGSEGV`. The fix is to read the `opt` parameter that is
+  already in hand. A one-line test of a normal problem found this immediately;
+  nothing subtle was involved except assuming the surrounding lines meant what
+  they looked like.
+
+**A/B: 0 differing over 172 comparable pairs.** No corpus problem reaches
+`max_megs` during preprocessing, so the change is invisible there — which is
+the point worth noting about this whole series. The corpus A/B is the gate
+that catches lost proofs, and it could not have found any of M9, M10, M11 or
+M12, because all four only matter at a scale the corpus does not reach. What
+found them was a sweep over 5,171 problems at a budget long enough for the
+behaviour to appear, and then reading the failures instead of counting them.
+
+---
+
 ## The gates, and the one that was a comment
 
 There are three tiers, and the third one did not exist as anything executable

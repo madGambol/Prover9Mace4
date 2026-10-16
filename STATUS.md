@@ -92,6 +92,33 @@ This is not belt-and-braces. Tier2 passed green on a build that had silently
 it. Tier2 is 41 problems of a few dozen clauses and structurally cannot see a
 change that only matters at scale or to an invariant.
 
+## The memory-accounting series, M9 through M12
+
+Worth reading before touching anything that allocates. One defect appeared in
+four places, and each was found only after the previous one was fixed:
+
+| | what | how it showed |
+| --- | --- | --- |
+| M9 | Mace4's cell table: `d^arity` cells, `int` total, unchecked `malloc`, outside `palloc` | 56 GB request; `SIGSEGV` in 6% of a sweep |
+| M10 | the negprop index: `(d+1)^arity` tree, same three faults, on by default | 160 GB cgroup ceiling in 20 s; one problem wanted 1.4 TB |
+| M11 | `get_mem`/`get_cmem` above 500 pointers, and `megs_malloced()` omitting `Bytes_external` | `max_megs=500` was really holding ~1,068 MB |
+| M12 | `disable_max_megs()` leaves the limit unenforced until the first `search()` node | 38 of 59 `FATAL` runs died at the OS limit, not at `max_megs` |
+
+The pattern: **the program had a memory limit, reported it, and did not apply
+it to the allocation that mattered.** M9's write-up already contained the grep
+listing every direct allocation in `mace4.src`, and only the sites named by
+the backtrace were acted on — which is why there were three more. Use
+`test.src/audit_alloc.py`, and when a size derives from a symbol property
+(arity, domain size, vocabulary count), remember that clausification
+manufactures symbols no input file shows: `LCL651+1.010` has maximum arity 2
+and produces Skolem functions up to arity 29.
+
+None of these four could have been caught by the corpus A/B, which is
+otherwise the strongest gate here: all four only matter at a scale the corpus
+never reaches. They were found by a 5,171-problem sweep at a budget long
+enough for the behaviour to appear, and by reading its failures rather than
+counting them.
+
 ## What is outstanding
 
 Roughly in order of expected value.
