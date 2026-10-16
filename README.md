@@ -187,8 +187,21 @@ The shape matters more than the totals: 71% of Prover9's successes arrive
 within one second, and the solve rate falls from 83.8% on problems TPTP rates
 easiest to 1.5% on those it rates hardest. The weakest domain by a wide margin
 is Commonsense Reasoning — 32 of 548 — which is also the domain whose problems
-come from large hand-built ontologies, 324 of them Cyc-derived. Raw results and
-the harness are in `~/Projects/TPTP/results-prover9mace4/`.
+come from large hand-built ontologies, 324 of them Cyc-derived.
+
+The harness and every scored sweep are published separately, as
+**[Prover9Corpus](https://mirror.invalid/Prover9Corpus)**,
+because they are bulky and have a different licence footprint. Its scripts
+expect to find this tree beside them:
+
+```sh
+git clone https://mirror.invalid/Prover9Corpus.git prover9-corpus
+# the scripts default to ../Prover9Mace4/bin; BIN_DIR and TPTP_DIR override
+```
+
+The TPTP library itself is in neither repository — `results/` holds problem
+*paths*, not problems — so reproducing any TPTP figure needs v9.3.1 from
+<https://www.tptp.org>.
 
 ## Licence
 
