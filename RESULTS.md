@@ -29,7 +29,7 @@ Three documents sit beside this one:
 | Problems that fail to translate | 3,038 | 2,948 |
 | TPTP problems answered, 10 s CPU budget | 2,484 | 2,383 |
 | Prover9 startup on a 44,227-clause problem | 162.8 s | 3.2 s |
-| Defects found and fixed | — | 48 |
+| Defects found and fixed | — | 58 |
 
 The two headline numbers point in opposite directions and both are real. **The
 wrong answers are gone, and this tree answers about 4% fewer problems at a
@@ -327,7 +327,9 @@ are CPU time (`ulimit -t`), not wall clock.
 
 ## 7. What was fixed
 
-48 defects, catalogued in `FIXES.md` with a reproducer and a measurement each.
+**58 fixes**, of which 55 carry an id in `FIXES.md` and have a reproducer and a
+measurement each; the other three are translator fixes demonstrated in
+`test.src/demos/` without an id.
 
 | class | ids | count |
 | --- | --- | ---: |
@@ -335,6 +337,7 @@ are CPU time (`ulimit -t`), not wall clock.
 | memory accounting and limits, Mace4 | M9–M13 | 5 |
 | performance, all vocabulary- or accumulation-proportional | PF1–PF10 | 10 |
 | TPTP translation, including the one that produced wrong answers | T1–T5, T9 | 6 |
+| further translator fixes, demonstrated without an id: `include(f,[names])` ignored its name list and added every axiom; TPTP's distinct-object token was not lexable at all; NAND and NOR were never declared to the parser, so their conversion code was unreachable | `demos/t6`-`t8` | 3 |
 | undefined behaviour, UBSan-confirmed | U1–U3 | 3 |
 | sentinel and narrowing defects | N1–N3 | 3 |
 | hangs and crashes on truncated input | D1–D2 | 2 |
