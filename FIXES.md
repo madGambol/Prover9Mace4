@@ -3357,7 +3357,7 @@ This is the project's own defect, not upstream's, and it is recorded here on
 the same terms as the rest: what broke, how it was found, what the measurement
 said, and what the fix is.
 
-### R1 — the discrimination child index reordered the children, and thirteen problems stopped being proved
+### R1 — the discrimination child index reordered the children, and twelve problems stopped being proved
 `ladr/discrim.c`, `ladr/discrim.h`, introduced by `a88f027` (PF10)
 
 **How it surfaced.** Not by a test. The first capability A/B against the
@@ -3382,9 +3382,19 @@ on the same 205 prover9 losses.
 | **current translation** | 18 | 6 |
 
 Read down a column and the translation accounts for almost all of it; read
-across a row and the prover accounts for 15. Per problem: **186 of 205 losses
-are the corrected input defeating both provers, 13 are the prover, 6 were
-noise.** The 13 are the defect.
+across a row and the prover accounts for 15. Per problem: **187 of 205 losses
+are the corrected input defeating both provers, 12 are the prover, 6 were
+noise.** The 12 are the defect.
+
+One of the 13 the first pass attributed to the prover was itself a boundary
+flip, and it is worth recording because it is the same trap the cross-feed is
+meant to avoid. `NUM/NUM556+3` proves in 0.03 s on the OLD translation under
+either prover; on the corrected one pristine takes **14.78 s** and this tree
+**12.31 s** — this tree is faster, and both exceed the 10 s budget. The single
+10 s rep that recorded pristine proving it was load-lucky. The cross-feed is
+run at one rep per cell, so its PROVER column needs the same reps-and-
+interleaving discipline as everything else before a cell is believed; the
+surviving twelve were confirmed by `cap_gate.sh` against both builds.
 
 **It was not a slowdown.** At a 300 s budget, on the *same* input, with two
 reps each:
@@ -3474,8 +3484,10 @@ startup: keys inline **5.0 s**, keys behind the pointer **6.5 s**.
 ```
 
 PF10's speedup is intact — 24x to 28x over pristine on the ladder, 12x on
-CSR040-10 startup — and all 13 problems are answered again at pristine's times
-(SWV558-1.010 in 0.03 s, SWB006-10 exhausted in 3.50 s).
+CSR040-10 startup — and all 12 problems are answered again at pristine's times
+(SWV558-1.010 in 0.03 s, SWB006-10 exhausted in 3.50 s).  Verified by
+`prover9-corpus/cap_gate.sh`, which reports 10 lost against the unfixed build
+and 0 against this one.
 
 **The test that was missing.** `test.src/discrim_test.c` passed throughout.
 Its three cases ask what the index *returns* for a symbol, which was always
