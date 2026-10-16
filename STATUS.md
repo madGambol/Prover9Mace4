@@ -92,6 +92,33 @@ This is not belt-and-braces. Tier2 passed green on a build that had silently
 it. Tier2 is 41 problems of a few dozen clauses and structurally cannot see a
 change that only matters at scale or to an invariant.
 
+## The memory-accounting series, M9 through M12
+
+Worth reading before touching anything that allocates. One defect appeared in
+four places, and each was found only after the previous one was fixed:
+
+| | what | how it showed |
+| --- | --- | --- |
+| M9 | Mace4's cell table: `d^arity` cells, `int` total, unchecked `malloc`, outside `palloc` | 56 GB request; `SIGSEGV` in 6% of a sweep |
+| M10 | the negprop index: `(d+1)^arity` tree, same three faults, on by default | 160 GB cgroup ceiling in 20 s; one problem wanted 1.4 TB |
+| M11 | `get_mem`/`get_cmem` above 500 pointers, and `megs_malloced()` omitting `Bytes_external` | `max_megs=500` was really holding ~1,068 MB |
+| M12 | `disable_max_megs()` leaves the limit unenforced until the first `search()` node | 38 of 59 `FATAL` runs died at the OS limit, not at `max_megs` |
+
+The pattern: **the program had a memory limit, reported it, and did not apply
+it to the allocation that mattered.** M9's write-up already contained the grep
+listing every direct allocation in `mace4.src`, and only the sites named by
+the backtrace were acted on — which is why there were three more. Use
+`test.src/audit_alloc.py`, and when a size derives from a symbol property
+(arity, domain size, vocabulary count), remember that clausification
+manufactures symbols no input file shows: `LCL651+1.010` has maximum arity 2
+and produces Skolem functions up to arity 29.
+
+None of these four could have been caught by the corpus A/B, which is
+otherwise the strongest gate here: all four only matter at a scale the corpus
+never reaches. They were found by a 5,171-problem sweep at a budget long
+enough for the behaviour to appear, and by reading its failures rather than
+counting them.
+
 ## What is outstanding
 
 Roughly in order of expected value.
@@ -141,22 +168,44 @@ Roughly in order of expected value.
    the figure itself is still to be collected, now with
    `oracle_sweep_resume.sh`, which recomputes the remaining work from the
    output file and halves concurrency when the driver does not survive.
-5. **The unaccounted allocations in `ladr/`.** M9 and M10 covered
-   `mace4.src`, where every direct `malloc`/`calloc` is now checked. `ladr/`
-   has about twenty more that bypass `palloc` and so are invisible to
-   `megs_malloced()` — `features.c` sizes six arrays by `Work_size`,
-   `dollar.c` two by `Symbols_size`, `formula.c` one by `max_vars`. None is
-   exponential in an arity the way M9 and M10 were, so none can take a
-   machine down, but they are the same class and the same audit applies:
-   check the return, and charge it to the budget the program reports.
+5. **The remaining unchecked allocations in `ladr/`.** The important one is
+   fixed: M11 charged and checked `get_mem`/`get_cmem`'s large-block path,
+   which every caller goes through, and put `Bytes_external` into
+   `megs_malloced()`. About seventy direct `malloc`/`calloc` sites in `ladr/`
+   still do not check their return — `interp.c` has roughly forty of them.
+   None is exponential in an arity the way M9 and M10 were, so none can take
+   a machine down, and the sizes are now mostly charged because they come
+   through `get_mem`; what is left is turning a NULL dereference into a
+   diagnostic. `test.src/audit_alloc.py` lists them — run it, do not grep,
+   because grepping is what left M10 and M11 in place after M9.
+
+   Current counts: `mace4.src` 13 sites, **0 unchecked**; `ladr/` 79 sites,
+   70 unchecked (about forty in `interp.c` alone); `provers.src` 14 sites, 7
+   unchecked.
+
+   Two specific findings from that audit, neither urgent:
+
+   - `compile_interp` in `ladr/interp.c` computes `n = domain_size^arity`
+     with a plain `int` multiply loop and **no overflow guard**, then
+     `malloc(n * sizeof(int))` unchecked. It is the same wrap as M9, but
+     shielded in practice: `listterm_length(lst) != n` two lines above means
+     the input has to supply `n` list elements, so a wrapped `n` fails that
+     check and a large `n` needs a correspondingly huge input file. The arity
+     is not manufactured by clausification here, which is what made M9 and
+     M10 dangerous. Worth a `cells_for_symbol`-style guard anyway, since this
+     is the path `interpformat` and `clausetester` use — the soundness
+     oracle's own verification tools.
+   - `init_pair_index` in `ladr/pindex.c` allocates `n*n` twice over, but
+     **has no callers**, so it is dead rather than dangerous.
 6. **Two more hand-rolled containers**, if the C++ pattern is worth continuing:
    the discrimination-tree child index and the grouping in `collect_multiples`.
    Expect ~0% speed and roughly 230 fewer lines; the case is bug surface, not
    performance.
-7. **`max_megs` default.** `DEFAULT_MAX_MEGS` in `ladr/memory.c` is 1000, but
-   Prover9 and Mace4 override it from their own parameter, still 500
-   (`provers.src/search.c`, `mace4.src/msearch.c`). Raising those changes
-   results on memory-bounded runs, so it is a decision rather than a fix.
+7. ~~**`max_megs` default.**~~ **Done, and it had to be.** Both overrides are
+   1000 now. M11 made the accounting honest, which by itself would have
+   halved the effective budget every earlier result was obtained under — the
+   500 MB ceiling was really holding about 1,068 MB on `ALG033+1`. Doubling
+   restores the budget and makes the number mean what it says.
 8. **`MAX_VARS`** is still 100, blocked by the `Context` arrays, the variable-ID
    stride multiplier, `compress.c`'s char assumption and `MAX_BASIS`. 17 of 40
    sampled FATAL TPTP problems hit it.

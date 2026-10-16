@@ -2803,6 +2803,212 @@ script, run against three builds:
 
 ---
 
+## M11: `max_megs` was counting about half of the memory
+
+M9 and M10 bounded two allocations in `mace4.src` that `palloc` never saw.
+The audit they prompted found the same hole **inside LADR's own allocator**,
+where it applies to every caller, Prover9 included.
+
+`get_mem()` and `get_cmem()` hand out blocks measured in pointers. Below
+`MAX_MEM_LISTS` (500 pointers, 4,000 bytes) they come from `palloc`, which is
+counted. At or above it, they came from raw `malloc`/`calloc`:
+
+```c
+if (n >= MAX_MEM_LISTS)
+  p = malloc(n * BYTES_POINTER);     /* unchecked, and invisible to max_megs */
+```
+
+and `megs_malloced()` — the figure Prover9 prints as "Total malloced", and
+the one Mace4's own `max_megs` check is built on — reported `palloc` alone:
+
+```c
+int megs_malloced(void) { return Malloc_calls * MALLOC_MEGS; }
+```
+
+So `Bytes_external` existed, was charged by the C++ containers, was enforced
+by `charge_external_mem()` — and was **left out of the figure anyone reads**.
+
+**How much this was hiding.** `ALG033+1` is one of the two corpus problems
+that terminate *by* exhausting `max_megs`, at the 500 MB default:
+
+```
+Megabytes=524.29.                                     <- what it reported
+Megs malloced by palloc(): 500.                       <- what it counted
+    formula arg arrays:          581844.2 K           <- 568 MB it did not
+```
+
+Those arg arrays are `get_mem` blocks well over 500 pointers. The run was
+holding about **1,068 MB while reporting that it had hit a 500 MB ceiling** —
+roughly a factor of two, consistently, on exactly the runs where the limit is
+the thing that decides the outcome.
+
+**The fix** is four small changes in `ladr/memory.c`: check the return of both
+large-block paths, `charge_external_mem()` them, `discharge_external_mem()`
+the matching `free_mem()` path to keep the pair symmetric, and include
+`Bytes_external` in `megs_malloced()`.
+
+**And then the default had to move, or the fix would be a silent 2x cut.**
+Honest accounting means `max_megs=500` now really is 500 MB, which is half the
+effective budget every previous result was obtained under. `DEFAULT_MAX_MEGS`
+in `ladr/memory.c` was already 1000; Prover9 and Mace4 overrode it with 500
+from their own parameter. Both now use 1000, which is the doubling the owner
+of this tree had already sanctioned — "in modern systems the 500MB limit isn't
+really a limit anymore, we could double that without heartache" — and which
+restores the effective budget while making the number mean what it says:
+
+| | reports | palloc | arg arrays | really held |
+| --- | --- | ---: | ---: | ---: |
+| before, `max_megs=500` | 524.29 MB | 500 | 568 MB | ~1,068 MB |
+| after, `max_megs=1000` | 754.97 MB | 989 | 700 MB | ~1,689 MB |
+
+**A/B.** Two pairs of 174 differ, both explained, and both are gains rather
+than regressions:
+
+- `prover9 ALG033+1` does more work before the ceiling — 755 MB of real usage
+  against 524 — and still ends in `exit (max_megs)`, which is the condition
+  this gate exists to assert.
+- `mace4 SWC258+1` reaches **domain size 9** where it previously stopped at 8.
+  Same verdict, `max_megs_no`, strictly more search done.
+
+Nothing lost a proof or a model. A/A was 0 over the same run.
+
+### A detour worth recording: CPU time is not load-invariant
+
+Verifying the sweep's models turned up one that would not reproduce —
+`MGT108+1`, recorded as `MODEL` at 265 s against a 300 s budget, which then
+timed out on a re-run. The build that produced the row found the model at
+274 s; the current build did not find it at all. That reads exactly like a
+capability regression from M9 or M10, and chasing it spent an hour.
+
+It was not one. The same mace4 binary on the same input, four interleaved
+reps while a 48-job sweep was running:
+
+| | pre-M9 | M9 | M9+M10 | +M11 |
+| --- | ---: | ---: | ---: | ---: |
+| rep 1 | 20.48 s | 20.43 s | 20.19 s | 13.72 s |
+| rep 2 | 18.95 s | 18.51 s | 17.46 s | 16.42 s |
+| rep 3 | 10.87 s | 10.21 s | 14.26 s | 14.52 s |
+| rep 4 | 10.14 s | 10.31 s | 11.21 s | 11.87 s |
+
+A **2x spread in CPU seconds within a single build**, tracking machine load,
+larger than any gap between builds. `MGT108+1` found its model at 260 s idle
+on the very build that had "lost" it. With a 900 s budget it verifies: 1
+interpretation, all clauses satisfied.
+
+This corrects a claim made elsewhere in this document — that a CPU-time budget
+"means the same thing with sixty runs in flight as with one". It does not.
+`ulimit -t` is still strictly better than a wall-clock guard, because it does
+not turn queueing into a timeout, but CPU time measures time *on core* and
+under memory-bandwidth and cache contention a process does less work per
+on-core second. Two consequences for this project's own methods:
+
+- A timing comparison between builds must interleave them and repeat, and the
+  within-build spread has to be compared against the between-build gap before
+  any gap is believed. Serial measurement under varying load produced an
+  apparent 50% regression that does not exist.
+- A capability sweep's results within roughly ±35% of its limit are not
+  reproducible. 31 models were found at 300 s; at least one of them is a
+  coin-flip at that budget.
+
+The one thing kept from the detour: `mace_megs()` reaches
+`check_time_memory()`, which runs at the top of `search()` — once per node of
+the search tree — so both the `Cell_table_bytes` and `Bytes_external`
+divisions M9 and M11 had put there are now maintained as megabyte counters
+instead. That was the hypothesis for the slowdown; it was wrong, but a
+division per search node is worth not having regardless.
+
+**The thing to notice** is that this was the third appearance of one defect.
+M9 was a 56 GB table; M10 a `(d+1)^arity` tree; M11 a factor of two across
+every large block in the library. All three were "an allocation the accounting
+cannot see", and the first two were found by a crash while the third was only
+ever visible in a number that looked plausible. A memory ceiling that is
+believed and wrong is worse than no ceiling, because every result obtained
+under it carries the error silently.
+
+---
+
+## M12: `max_megs` was not enforced before the first search node
+
+The fourth and last instance, and the one that most directly explains the
+reboot. Found while checking something else: the 300-second sweep's `FATAL`
+rows were re-run to confirm that none of them came from the `fatal_error`
+calls M9–M11 had added. None did. But 38 of the 59 said this:
+
+```
+Fatal error:  palloc, operating system is out of memory
+```
+
+That is not `max_megs`. These runs were given `assign(max_megs, 2000)` and
+died at a 12 GB address-space cap instead, and every one of them died during
+`DOMAIN SIZE n`, **before searching**.
+
+**Why.** Mace4 opens with
+
+```c
+disable_max_megs();  /* mace4 does its own max_megs check */
+```
+
+and its own check lives in `check_time_memory()`, which is called from the
+top of `search()`. But `mace4n()` does a great deal of work before `search()`
+is ever reached — `generate_ground_clauses()` instantiates every clause over
+the domain, three passes, units first — and that is precisely where a large
+domain size explodes. With LADR's check disabled for the whole run and
+Mace4's own check not yet reachable, those allocations had **no ceiling but
+the operating system's**.
+
+So the shape is the same as M9, M10 and M11, in the fourth of four places: the
+program had a memory limit, reported it, and did not apply it to the
+allocation that mattered.
+
+**The fix** keeps Mace4's own check — it counts the estack and the cell
+tables that `palloc` cannot see — and stops switching LADR's off:
+
+```c
+set_max_megs(parm(opt->max_megs));
+set_max_megs_proc(mace4_max_megs_exit);
+```
+
+Whichever ceiling is reached first wins, and both report `max_megs`.
+`SWW913+1`, the typical case:
+
+| | before | after |
+| --- | --- | --- |
+| outcome | `palloc, operating system is out of memory` | `exit (max_megs_no)` |
+| peak RSS | grew to the 12 GB cap | **2.37 GB**, against a 2000 MB ceiling |
+| diagnostic | none | names ground-clause generation and the domain size |
+
+Uncapped, and forty-eight wide, that unbounded growth is the machine-killer.
+M9 and M10 closed the other two routes to it; this was the last live one.
+
+**Two mistakes made getting here**, both caught by running the thing rather
+than reasoning about it, and both worth recording because they are generic:
+
+- **An out-of-memory handler must disarm itself before it reports.** This one
+  is called from inside `palloc`, so its own `printf` and the statistics in
+  `mace4_exit()` allocate, re-enter it, and recurse until the stack is gone.
+  The first version turned every affected run into a `SIGSEGV` — strictly
+  worse than the defect it replaced. It now sets a flag, calls
+  `disable_max_megs()`, and if re-entered anyway `_exit()`s without touching
+  the allocator at all.
+
+- **Read the initialisation order before moving a call.** The call initially
+  sat exactly where `disable_max_megs()` had been, which is *before*
+  `Opt = opt`, so `parm(Opt->max_megs)` dereferenced a null `Opt` and **every**
+  Mace4 run died in `SIGSEGV`. The fix is to read the `opt` parameter that is
+  already in hand. A one-line test of a normal problem found this immediately;
+  nothing subtle was involved except assuming the surrounding lines meant what
+  they looked like.
+
+**A/B: 0 differing over 172 comparable pairs.** No corpus problem reaches
+`max_megs` during preprocessing, so the change is invisible there — which is
+the point worth noting about this whole series. The corpus A/B is the gate
+that catches lost proofs, and it could not have found any of M9, M10, M11 or
+M12, because all four only matter at a scale the corpus does not reach. What
+found them was a sweep over 5,171 problems at a budget long enough for the
+behaviour to appear, and then reading the failures instead of counting them.
+
+---
+
 ## The gates, and the one that was a comment
 
 There are three tiers, and the third one did not exist as anything executable
@@ -2858,7 +3064,9 @@ both would have made it useless while appearing to work:
   a stall when the process is in fact pegged at 100% of its one core and 1.25%
   is simply one core out of eighty. They fan out across every core now, capped
   by available memory rather than by core count. Parallelism is safe because
-  the per-run budget is `ulimit -t`, CPU time, which means the same thing with
+  the per-run budget is `ulimit -t`, CPU time, which is far more stable than a
+  wall clock — though **not load-invariant**, see "CPU time is not
+  load-invariant" above — and means roughly the same thing with
   sixty runs in flight as with one — a wall-clock guard would not, having once
   faked 38.9% of a sweep's "timeouts".
 

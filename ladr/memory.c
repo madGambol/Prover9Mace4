@@ -84,6 +84,12 @@ static size_t Bytes_palloced = 0;
 
 static size_t Bytes_external = 0;
 
+/* Bytes_external in megabytes, maintained as it changes.  megs_malloced() is
+   on Mace4's per-search-node path through mace_megs(), so it must not
+   divide; charge/discharge happen far less often than the figure is read. */
+
+static size_t Megs_external = 0;
+
 /* These are char* rather than void* because palloc() does arithmetic on
    them.  Arithmetic on void* is a GCC extension (it treats void as having
    size 1), not standard C: a conforming compiler is entitled to reject
@@ -184,8 +190,14 @@ void *get_cmem(unsigned n)
   else {
     void **p = NULL;
     BUMP_MEM_CALLS;
-    if (n >= MAX_MEM_LISTS)
-      return calloc(n, BYTES_POINTER);
+    if (n >= MAX_MEM_LISTS) {
+      /* See get_mem(): charged and checked for the same reasons. */
+      p = calloc(n, BYTES_POINTER);
+      if (p == NULL)
+        fatal_error("get_cmem, out of memory");
+      charge_external_mem((size_t) n * BYTES_POINTER);
+      return p;
+    }
     else if (M[n] == NULL)
       p = palloc(n * BYTES_POINTER);
     else {
@@ -222,8 +234,18 @@ void *get_mem(unsigned n)
   else {
     void **p = NULL;
     BUMP_MEM_CALLS;
-    if (n >= MAX_MEM_LISTS)
+    if (n >= MAX_MEM_LISTS) {
+      /* Blocks this big bypass palloc, so megs_malloced() cannot see them
+         and max_megs could not bound them -- the same defect that let Mace4
+         ask for 56 GB while reporting a 2 GB ceiling (M9).  Charge them to
+         the external total, which megs_malloced() includes and
+         charge_external_mem() enforces, and check the result rather than
+         handing NULL back to a caller that will dereference it. */
       p = malloc(n * BYTES_POINTER);
+      if (p == NULL)
+        fatal_error("get_mem, out of memory");
+      charge_external_mem((size_t) n * BYTES_POINTER);
+    }
     else if (M[n] == NULL)
       p = palloc(n * BYTES_POINTER);
     else {
@@ -254,8 +276,11 @@ void free_mem(void *q, unsigned n)
   else {
     /* put it on the appropriate avail list */
     void **p = q;
-    if (n >= MAX_MEM_LISTS)
+    if (n >= MAX_MEM_LISTS) {
+      /* Charged by get_mem()/get_cmem(); keep the pair symmetric. */
+      discharge_external_mem((size_t) n * BYTES_POINTER);
       free(p);
+    }
     else {
 #ifdef POISON_FREED_MEM
       /* Everything but the avail-list link; see POISON above. */
@@ -322,7 +347,12 @@ has obtained from the operating system by malloc();
 /* PUBLIC */
 int megs_malloced(void)
 {
-  return Malloc_calls * MALLOC_MEGS;
+  /* Bytes_external holds what was allocated outside palloc but charged:
+     the C++ containers behind I2accum and lookup_by_id, and blocks of
+     MAX_MEM_LISTS pointers or more from get_mem()/get_cmem().  Leaving it
+     out meant this figure, the "Total malloced" line built from it, and
+     Mace4's own max_megs check were all blind to it. */
+  return Malloc_calls * MALLOC_MEGS + (int) Megs_external;
 }  /* megs_malloced */
 
 /*************
@@ -342,6 +372,7 @@ what it says.
 void charge_external_mem(size_t n)
 {
   Bytes_external += n;
+  Megs_external = Bytes_external / (1024 * 1024);
   if (Max_megs_check &&
       (size_t) Malloc_calls * MALLOC_MEGS
 	+ Bytes_external / (1024 * 1024) > (size_t) Max_megs) {
@@ -368,6 +399,7 @@ void discharge_external_mem(size_t n)
   /* Saturate rather than wrap: a mismatched pair is a bug, but a wrapped
      size_t here would make the ceiling unreachable and hide it. */
   Bytes_external = (Bytes_external >= n) ? Bytes_external - n : 0;
+  Megs_external = Bytes_external / (1024 * 1024);
 }  /* discharge_external_mem */
 
 /*************
