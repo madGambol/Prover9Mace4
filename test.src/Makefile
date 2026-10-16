@@ -218,6 +218,28 @@ ab:
 	./ab.sh aa
 	B="$(BASELINE)" ./ab.sh ab
 
+# The CAPABILITY gate: does this build still answer the TPTP problems the
+# pristine release answers?
+#
+#   make cap BASELINE=/path/to/pristine/bin
+#
+# WHY THIS IS A SEPARATE TIER, AND WHY IT EXISTS AT ALL.  Every other target in
+# this file asks whether the build still does what the previous build did on
+# inputs the tree already has.  R1 (see ../FIXES.md) passed all of them -- tier1,
+# tier2, the 174-run corpus A/B above, determinism, ASan+UBSan on 336 pairs,
+# poison on 336, valgrind on 168 -- while costing twelve TPTP problems, because
+# a capability loss on problems none of those sets contain is invisible to all
+# of them.  The commit that introduced R1 even named the gate it needed, in its
+# own message, and was merged without it: a precondition written in a commit
+# message is not a gate, which is why this is a target.
+#
+# It needs the TPTP library and the corpus repo, so it SKIPS cleanly when they
+# are absent rather than failing a build that cannot run it.
+
+cap:
+	@if [ -z "$(BASELINE)" ]; then 	  echo "make cap needs BASELINE=<pristine bin dir> to compare ../bin against"; 	  exit 2; 	fi
+	@g=$${CAP_GATE:-$$HOME/Projects/prover9-corpus/cap_gate.sh}; 	if [ -x "$$g" ]; then 	  "$$g" "$(BASELINE)" "$$(cd .. && pwd)/bin" $${CAP_SECS:-10} $${CAP_JOBS:-32}; 	else 	  echo "cap: SKIP (no $$g -- needs the prover9-corpus repo and the TPTP library)"; 	fi
+
 # Promote rc to master, refusing unless master's tree will be identical to the
 # tree the gates ran against.  See the comments in promote.sh: tree identity
 # is the invariant, not whether the merge fast-forwarded.
