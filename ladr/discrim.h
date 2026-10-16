@@ -148,7 +148,9 @@ void discrim_child_removed(Discrim parent, Discrim child);
 
 BOOL discrim_child_indexed(Discrim parent);
 
-void discrim_child_append(Discrim parent, Discrim child);
+void discrim_child_insert(Discrim parent, Discrim child);
+
+BOOL discrim_children_ordered(Discrim d, int n);
 
 /* End of public definitions */
 
