@@ -257,6 +257,19 @@ Fixed by replacing the hash table with the same children **sorted in an array**
 the other three need 3.4–4.8 CPU seconds and straddle a 10-second budget under
 64-way load, and are `EXHAUSTED` 3 times out of 3 on an idle machine.
 
+### What the re-run says, and the part of it that is load
+
+Re-running the whole A/B against the fixed build moves prover9 from 2,219 to
+2,224 and the losses from 215 to 204, and shows **9 of R1's 12** recovered
+rather than all 12. The other three are `EXHAUSTED` **3 times out of 3 on an
+idle machine** at the same 10-second budget, needing 3.4 to 4.8 CPU seconds to
+do it, which 64-way load inflates past ten. Comparing the two runs of the
+current build also shows 15 problems "lost" and 19 "gained" — and all 15 are
+answered **3 times out of 3 idle**, so they are the sweep's own noise and not
+the code. **A fix measured inside a saturated sweep is measured at a
+discount**, and about 15 problems of either sign is this sweep's noise floor at
+a 10-second budget.
+
 ### Honest reading of the trade
 
 Pristine answers 101 more problems at this budget **and gets 99 wrong.** This
