@@ -1,7 +1,19 @@
 # Prover9 and Mace4 — LADR-2009-11A, repaired for modern toolchains
 
-**Picking this up?** `STATUS.md` has the current state, how to gate a
-change, and what is outstanding. `FIXES.md` is the defect catalogue.
+**Here for the results?** **`RESULTS.md`** is the measured summary: what this
+work changed, what it cost, and the gains and losses set out side by side. The
+short version is that 99 wrong answers across 17,992 TPTP runs become 0, startup
+on a 44,227-clause problem goes from 162.8 s to 3.2 s, and this tree answers
+about 4% fewer problems at a fixed 10-second budget — because fixing a
+translation defect turns an easy wrong problem into the hard right one.
+
+**Working on it?** `STATUS.md` has the current state, how to gate a change, and
+what is outstanding. `FIXES.md` is the defect catalogue, 58 of them, each with a
+reproducer and a measurement.
+
+**Building an inference engine?** `ENGINE-NOTES.md` is why this exercise was
+done: what these two programs teach that transfers, including the one defect
+this work introduced itself and what it cost to find.
 
 This is William McCune's **LADR-2009-11A** release of Prover9 (a resolution/
 paramodulation theorem prover for first-order and equational logic) and Mace4
