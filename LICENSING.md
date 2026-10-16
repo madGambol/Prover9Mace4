@@ -5,8 +5,8 @@ and it cannot be anything else. [`COPYING`](COPYING) holds the licence text.
 
 ## What the upstream files say
 
-All 250 `.c` and `.h` files in the LADR-2009-11A release carry the same
-notice, byte-for-byte:
+250 of the LADR-2009-11A release's 307 `.c` and `.h` files carry the same
+notice, byte-for-byte — every compiled one:
 
 ```
 /*  Copyright (C) 2006, 2007 William McCune
@@ -51,11 +51,11 @@ per file, directly under the upstream notice:
 
 ```
 /*  CHANGE NOTICE (GPL-2, section 2a): this file was modified by Chris Arena
-    on 2026-10-13 through 2026-10-16, and is not as William McCune released it
+    on 2026-10-11 through 2026-10-16, and is not as William McCune released it
     in LADR-2009-11A. What changed and why is in FIXES.md; this file's own
     diff against the unmodified release is
 
-        git diff 25b4505 -- ladr/discrim.c
+        git diff 25b4505 -- LICENSING.md
 */
 ```
 
@@ -78,33 +78,64 @@ Three details worth knowing:
 
 ## Files this tree added
 
-The 13 `.c`/`.h`/`.cpp` files added here — the tests under `test.src/`, and
-`ladr/cxx_alloc.h`, `ladr/i2accum_cxx.cpp`, `ladr/symtab_cxx.cpp` — originally
-carried McCune's copyright line, because each was started from the header of
-the file it tests. That was a misattribution of authorship, in the one
-direction that matters: it credited work to someone who did not do it. They now
-read `Copyright (C) 2026 Chris Arena` and say plainly that McCune did not write
-them, while keeping the library's GPL-2 grant so they can be distributed with
-it.
+Every file added here carries the library's own licence text with
 
-The added shell, Python and Markdown files carry no header. They are covered by
-the statement above and by this file; nothing in GPL-2 asks for a per-file
-notice on new work.
+```
+Copyright (C) 2026 Chris Arena and Claude Opus 5, 2026-10-16.
+```
+
+and a paragraph saying plainly that it is new in this tree and that William
+McCune did not write it. That covers the 13 `.c`/`.h`/`.cpp` files (the tests
+under `test.src/`, plus `ladr/cxx_alloc.h`, `ladr/i2accum_cxx.cpp` and
+`ladr/symtab_cxx.cpp`), the 21 shell scripts and `test.src/audit_alloc.py`.
+
+The eight prover input files under `test.src/demos/` carry a three-line
+version of the same thing in `%` comments rather than the full text, because
+they are input to a theorem prover that echoes what it reads, and a 20-line
+header in the middle of a demonstration's output obscures the thing being
+demonstrated. The seven Markdown files carry a one-line footer, for the same
+reason in reverse: a licence block above the first heading would be the first
+thing a reader sees.
+
+All 13 source files first carried `Copyright (C) 2006, 2007 William McCune`,
+because each was started from the header of the file it tests. That was a
+misattribution of authorship in the one direction that matters — it credited
+work to someone who did not do it — and is the reason this section exists.
+
+**On naming an AI as a copyright holder.** The line above records who wrote the
+file, which is what the rest of this tree's attribution does too (the commits
+carry a `Co-Authored-By` trailer). It is not a claim about what is
+copyrightable: the US Copyright Office's position is that purely
+machine-generated material is not, so in practice the enforceable copyright in
+these files is Chris Arena's. Recording the authorship honestly and leaving the
+legal question to the law seemed better than quietly dropping half of it.
+
+## Upstream files that shipped without the notice
+
+Twenty files in LADR-2009-11A carry no licence text at all: the seven
+Makefiles, `VERSION_DATE.h`, the five dead sources under `apps.src/old/`,
+four Python scripts (`rev.py`, `apps.src/sig.py`, `ladr/kol.py`,
+`ladr/util/options-for-gui.py`) and `utilities/attack`, `utilities/looper`,
+`utilities/prover9-mace4`. (`utilities/gvizify` has its own, David A.
+Wheeler's.)
+
+Each now carries McCune's standard notice, and each says, in the notice
+itself, that it was **added in this tree** and that he did not write those
+lines there — so the text states the terms the release carries without
+pretending to be a notice he wrote. Where adding it was the file's only
+change, the §2(a) notice says exactly that.
+
+Left alone deliberately: the HTML manual under `web/`, the example and
+expected-output files, the manpages, and McCune's own working notes under
+`TODO/` and `utilities-old/`. They are his documents and data rather than
+parts of the program, and editing them to add a notice would alter the
+record of what he published.
 
 ## Things to decide before publishing
 
 These are points of fact about what the licence text asks for, not legal
 advice. If it matters commercially, ask a lawyer rather than taking a
 maintenance tree's README at face value.
-
-- **Three helper scripts carry no licence header at all** upstream:
-  `utilities/attack`, `utilities/looper` and `utilities/prover9-mace4`.
-  (`utilities/gvizify` does.) They are plainly part of the same package and
-  distributed under the same terms. The standard header was deliberately *not*
-  added to them, because writing a `Copyright (C) 2006, 2007 William McCune`
-  line into a file he left unmarked means asserting a copyright notice on his
-  behalf — a different act from recording a change of one's own. They carry
-  the §2(a) change notice and nothing more.
 
 - **No warranty.** GPL-2 §§11–12 disclaim all warranty, and that disclaimer
   comes along with the code. A maintenance tree that fixes memory-safety bugs
@@ -117,3 +148,8 @@ maintenance tree's README at face value.
 - **Attribution.** The programs' own banners and the HTML manual name McCune
   as the author. Those should stay as they are; this tree should be described
   as a repaired distribution of his release, not as a new program.
+
+---
+
+Copyright (C) 2026 Chris Arena and Claude Opus 5, 2026-10-16.  GPL-2.0-only; see
+`COPYING`.  Not part of the LADR-2009-11A release.

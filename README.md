@@ -221,3 +221,8 @@ tarball this tree starts from is archived by
 
 This repository is not affiliated with or endorsed by McCune, his institutions,
 or the LADR-2026 maintainers.
+
+---
+
+Copyright (C) 2026 Chris Arena and Claude Opus 5, 2026-10-16.  GPL-2.0-only; see
+`COPYING`.  Not part of the LADR-2009-11A release.

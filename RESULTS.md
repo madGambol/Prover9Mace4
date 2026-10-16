@@ -382,3 +382,8 @@ git clone https://mirror.invalid/Prover9Corpus.git prover9-corpus
 Build in a `git worktree`, not in place, and never rebuild `bin/` while a sweep
 is running: both rules were learned the hard way and are recorded in
 `STATUS.md`.
+
+---
+
+Copyright (C) 2026 Chris Arena and Claude Opus 5, 2026-10-16.  GPL-2.0-only; see
+`COPYING`.  Not part of the LADR-2009-11A release.

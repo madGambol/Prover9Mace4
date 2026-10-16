@@ -72,3 +72,8 @@ mechanically by `../regress.sh` rather than demonstrated here. They are
 included there with the same kind of comment, but each needs either a
 sanitizer build, a poisoned allocator or a generated input, so there is no
 single file to read.
+
+---
+
+Copyright (C) 2026 Chris Arena and Claude Opus 5, 2026-10-16.  GPL-2.0-only; see
+`COPYING`.  Not part of the LADR-2009-11A release.

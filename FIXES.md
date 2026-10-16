@@ -3535,3 +3535,8 @@ previous build did on these inputs" and the answer was yes — the defect is a
 against the pristine release is the only instrument here that found it, and it
 is the one that had never been run until now. It is worth running per feature,
 not per release.
+
+---
+
+Copyright (C) 2026 Chris Arena and Claude Opus 5, 2026-10-16.  GPL-2.0-only; see
+`COPYING`.  Not part of the LADR-2009-11A release.

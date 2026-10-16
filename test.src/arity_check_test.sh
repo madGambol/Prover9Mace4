@@ -1,4 +1,26 @@
 #!/bin/bash
+
+#  Copyright (C) 2026 Chris Arena and Claude Opus 5, 2026-10-16.
+#
+#  NEW IN THIS TREE, AND NOT PART OF LADR-2009-11A: William McCune did
+#  not write this file.  It was written for the audit of his release
+#  that FIXES.md describes, and carries the library's licence so that
+#  it can be distributed with it.
+#
+#  This file is part of the LADR Deduction Library.
+#
+#  The LADR Deduction Library is free software; you can redistribute it
+#  and/or modify it under the terms of the GNU General Public License,
+#  version 2.
+#
+#  The LADR Deduction Library is distributed in the hope that it will be
+#  useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with the LADR Deduction Library; if not, write to the Free Software
+#  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
 #------------------------------------------------------------------------------
 # Regression test for arity_check() / collect_multiples() in ladr/symbols.c.
 #

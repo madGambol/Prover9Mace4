@@ -413,3 +413,8 @@ Roughly in order of expected value.
   problem.
 - **A script in `test.src` that no target invokes is documentation, not a
   check.** The audit is one line, in `test.src/Makefile`.
+
+---
+
+Copyright (C) 2026 Chris Arena and Claude Opus 5, 2026-10-16.  GPL-2.0-only; see
+`COPYING`.  Not part of the LADR-2009-11A release.

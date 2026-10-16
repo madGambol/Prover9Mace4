@@ -1,4 +1,4 @@
-/*  Copyright (C) 2026 Chris Arena
+/*  Copyright (C) 2026 Chris Arena and Claude Opus 5, 2026-10-16.
 
     This file is part of the LADR Deduction Library.
 
