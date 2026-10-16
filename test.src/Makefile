@@ -218,6 +218,19 @@ ab:
 	./ab.sh aa
 	B="$(BASELINE)" ./ab.sh ab
 
+# Promote rc to master, refusing unless master's tree will be identical to the
+# tree the gates ran against.  See the comments in promote.sh: tree identity
+# is the invariant, not whether the merge fast-forwarded.
+#
+#   make promote GATED=$(git -C /path/to/gated/worktree rev-parse HEAD)
+
+promote:
+	@if [ -z "$(GATED)" ]; then \
+	  echo "make promote needs GATED=<the commit the gates ran against>"; \
+	  exit 2; \
+	fi
+	./promote.sh "$(GATED)"
+
 tier3:
 	@if [ -z "$(CORPUS)" ]; then \
 	  echo "tier3 needs a corpus:  make tier3 CORPUS=/path/to/list-of-inputs"; \
