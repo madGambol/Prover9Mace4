@@ -81,7 +81,8 @@ Three details worth knowing:
 Every file added here carries the library's own licence text with
 
 ```
-Copyright (C) 2026 Chris Arena and Claude Opus 5, 2026-10-16.
+Copyright (C) 2026 Chris Arena, 2026-10-16.
+Written in collaboration with Claude Opus 5 (Anthropic).
 ```
 
 and a paragraph saying plainly that it is new in this tree and that William
@@ -102,13 +103,14 @@ because each was started from the header of the file it tests. That was a
 misattribution of authorship in the one direction that matters — it credited
 work to someone who did not do it — and is the reason this section exists.
 
-**On naming an AI as a copyright holder.** The line above records who wrote the
-file, which is what the rest of this tree's attribution does too (the commits
-carry a `Co-Authored-By` trailer). It is not a claim about what is
-copyrightable: the US Copyright Office's position is that purely
-machine-generated material is not, so in practice the enforceable copyright in
-these files is Chris Arena's. Recording the authorship honestly and leaving the
-legal question to the law seemed better than quietly dropping half of it.
+**Why the credit is on its own line.** The copyright holder is Chris Arena. The
+second line records that the file came out of a collaboration with Claude Opus
+5, which is what the `Co-Authored-By` trailer on every commit already says, and
+keeps that out of the copyright line where it would be a claim about ownership
+rather than about who did the work. The US Copyright Office's position is that
+purely machine-generated material is not copyrightable, so a joint holder line
+would have asserted something the law does not grant; the authorship, which is
+simply a fact about how the file was written, is recorded instead.
 
 ## Upstream files that shipped without the notice
 
@@ -151,5 +153,6 @@ maintenance tree's README at face value.
 
 ---
 
-Copyright (C) 2026 Chris Arena and Claude Opus 5, 2026-10-16.  GPL-2.0-only; see
-`COPYING`.  Not part of the LADR-2009-11A release.
+Copyright (C) 2026 Chris Arena, 2026-10-16.  Written in collaboration
+with Claude Opus 5 (Anthropic).  GPL-2.0-only; see `COPYING`.  Not part
+of the LADR-2009-11A release.

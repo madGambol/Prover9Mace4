@@ -1,6 +1,7 @@
 #!/bin/sh
 
-#  Copyright (C) 2026 Chris Arena and Claude Opus 5, 2026-10-16.
+#  Copyright (C) 2026 Chris Arena, 2026-10-16.
+#  Written in collaboration with Claude Opus 5 (Anthropic).
 #
 #  NEW IN THIS TREE, AND NOT PART OF LADR-2009-11A: William McCune did
 #  not write this file.  It was written for the audit of his release

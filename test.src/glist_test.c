@@ -1,4 +1,5 @@
-/*  Copyright (C) 2026 Chris Arena and Claude Opus 5, 2026-10-16.
+/*  Copyright (C) 2026 Chris Arena, 2026-10-16.
+    Written in collaboration with Claude Opus 5 (Anthropic).
 
     This file is part of the LADR Deduction Library.
 

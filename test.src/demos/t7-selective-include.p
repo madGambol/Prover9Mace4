@@ -1,4 +1,5 @@
-% Copyright (C) 2026 Chris Arena and Claude Opus 5, 2026-10-16.
+% Copyright (C) 2026 Chris Arena, 2026-10-16.
+% Written in collaboration with Claude Opus 5 (Anthropic).
 % GPL-2.0-only, the same terms as the tree this exercises;
 % see COPYING at the top of it.  Not part of LADR-2009-11A.
 %------------------------------------------------------------------------------
