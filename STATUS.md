@@ -1,6 +1,6 @@
 # Where this stands
 
-As of 2026-10-14. `master` and `rc` are both at the same commit, the tree is
+As of 2026-10-16. `master` and `rc` are the **same commit**, the tree is
 clean, and every gate is green. `FIXES.md` is the defect catalogue and the
 place to look for detail; this file is for picking the work back up.
 
@@ -8,7 +8,8 @@ place to look for detail; this file is for picking the work back up.
 
 | | |
 | --- | --- |
-| branches | `master`, `rc` — in sync, no feature branches outstanding |
+| branches | `master`, `rc` — the same commit, no feature branches outstanding |
+| promotion | `make promote GATED=<commit>` — `--ff-only`, and it refuses unless master's tree will be identical to the tree the gates ran on |
 | upstream baseline | commit `25b4505` is the pristine 2009-11A tarball, so `git diff 25b4505` is every change |
 | build | `make all`; one caveat, below, about the C++ translation units |
 | gates | `make tier1`, `make tier2 BASELINE=…`, `make tier3 CORPUS=…`, plus the A/B |
@@ -63,6 +64,16 @@ The pristine-plus-build-fixes baseline for `BASELINE=` is commit `7f94204`:
 ```sh
 git worktree add --detach /tmp/base 7f94204 && (cd /tmp/base && make all)
 ```
+
+**Why master can skip the suite, and when it cannot.** The licence is not
+that the merge fast-forwarded — it is that master's tree is byte-identical to
+the tree that passed. Those differ: a `--no-ff` merge with nothing else on
+master gives an identical tree and the results transfer, while a merge that
+brings in a *second* branch gives a tree nothing was gated against, however
+clean the history looks. `make promote` checks the identity, allows
+documentation to differ because a write-up after the run changes nothing that
+was tested, requires master to be an ancestor of rc, promotes with
+`--ff-only`, and then proves the invariant rather than trusting it.
 
 `tier2`'s `BASELINE=` is not optional in spirit: it asserts that at least 30 of
 the 41 defect tests still **fail** against the unfixed code. A test that passes
