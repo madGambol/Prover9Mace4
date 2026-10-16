@@ -103,6 +103,7 @@ four places, and each was found only after the previous one was fixed:
 | M10 | the negprop index: `(d+1)^arity` tree, same three faults, on by default | 160 GB cgroup ceiling in 20 s; one problem wanted 1.4 TB |
 | M11 | `get_mem`/`get_cmem` above 500 pointers, and `megs_malloced()` omitting `Bytes_external` | `max_megs=500` was really holding ~1,068 MB |
 | M12 | `disable_max_megs()` leaves the limit unenforced until the first `search()` node | 38 of 59 `FATAL` runs died at the OS limit, not at `max_megs` |
+| M13 | `int_power`'s overflow test was undefined *and* wrong | `int_power(10,10)` returned 1410065408 as if exact; `int_power(0,5)` returned `INT_MAX` |
 
 The pattern: **the program had a memory limit, reported it, and did not apply
 it to the allocation that mattered.** M9's write-up already contained the grep
