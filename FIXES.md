@@ -3009,6 +3009,88 @@ behaviour to appear, and then reading the failures instead of counting them.
 
 ---
 
+## M13: `int_power` reported wrapped values as exact
+
+`int_power(n, exp)` is documented to return `INT_MAX` when the result does not
+fit in an `int`. It detected that by multiplying first and then asking whether
+the product had come out smaller:
+
+```c
+int x = r * n;
+if (x < r)
+  return INT_MAX;  /* overflow */
+r = x;
+```
+
+Signed overflow is undefined behaviour, so a compiler is entitled to assume it
+cannot happen and delete the test. But the test is also **simply wrong**, at
+every optimisation level, because a wrapped value does not have to land below
+the one it came from. Measured at both `-O0` and `-O2`:
+
+| call | returned | correct |
+| --- | ---: | ---: |
+| `int_power(10,10)` | 1410065408 | `INT_MAX` — 10^10 mod 2^32, and *larger* than the 10^9 it came from, so the test never fired |
+| `int_power(12,9)` | 864813056 | `INT_MAX` |
+| `int_power(0,5)` | `INT_MAX` | **0** — `0 < 1` is true, so zero was reported as overflow |
+
+Three wrong answers from one line, and the first two are the dangerous shape:
+a plausible-looking number, roughly a billion, returned as though exact.
+
+**Where it goes.** `int_power` is how `interp.c` sizes and bounds the tables of
+an interpretation — six call sites, among them an array length and a loop
+limit. And `compile_interp()` did not even use it; it had a bare loop with no
+check of any kind, feeding the result straight to `malloc`:
+
+```c
+for (j = 0, n = 1; j < arity; j++)
+  n = n * domain_size;
+...
+p->tables[symnum] = malloc(n * sizeof(int));
+```
+
+That is the path `interpformat` and `clausetester` take, which is to say it is
+the path **this project's own soundness oracle depends on** to re-derive a
+model and check it independently. The verification tool had the same class of
+defect as the thing it was verifying.
+
+**The fix** does the multiply in `long long`, which two `int`s can never
+overflow, and compares against `INT_MAX`/`INT_MIN` before narrowing — defined
+behaviour, correct for every sign. `compile_interp` now calls `int_power`,
+refuses a size that saturates, and checks its allocations.
+
+`test.src/intpower_test.c` is in tier1 and covers both directions: the values
+that must stay exact (including `2^29`, which is the arity a clausified
+modal-logic problem really produces at domain size 2) and the ones that must
+saturate (`3^29`, the same arity one domain size larger). Against the pristine
+build it reports 3 failures.
+
+**Every call site was then audited**, because the fix changes what callers
+receive: `INT_MAX` where they used to get a wrapped number, which would be a
+regression at any site that used it as an allocation size. None does. One —
+`compile_interp` — allocates, and it now refuses a saturated size. The other
+five use it as a **loop bound over an already-allocated table**
+(`interp.c:658, 960, 1061, 1106, 2248`), so a saturated value cannot become a
+large `malloc`; and `eval_literals_false_instances` (`interp.c:1346`) uses it
+in a subtraction but **has no callers at all**, like `init_pair_index` in
+`pindex.c`.
+
+That audit turned up a bonus. Before the fix, `compile_interp` sized the table
+with its own bare multiply loop while those five sites computed the bound with
+`int_power` — two different pieces of arithmetic for the same quantity, one
+wrapping and one saturating, so for a table large enough they **disagreed**.
+A loop bound that exceeds the allocation it walks is an out-of-bounds read.
+Both now go through the one function, and the case where they could not agree
+is refused outright.
+
+**Why this was missed by everything else.** The sanitizer sweep runs with
+UBSan, which detects signed overflow — but only on inputs that reach it, and
+no corpus problem drives an interpretation table past 2^31 entries. The A/B
+cannot see it for the same reason. It was found by reading `int_power` while
+looking for something else, after M9–M12 had established that this is where
+the bugs are: arithmetic on a size derived from an arity.
+
+---
+
 ## The gates, and the one that was a comment
 
 There are three tiers, and the third one did not exist as anything executable

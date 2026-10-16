@@ -78,6 +78,9 @@ varnum_test: varnum_test.o
 arity_test: arity_test.o
 	$(CC) $(CFLAGS) -o arity_test arity_test.o ../ladr/libladr.a -lm $(LADRLIBS)
 
+intpower_test: intpower_test.o
+	$(CC) $(CFLAGS) -o intpower_test intpower_test.o ../ladr/libladr.a -lm $(LADRLIBS)
+
 # Checks that the palloc() byte counter is wide enough; needs ~2.2GB.
 memory_test: memory_test.o
 	$(CC) $(CFLAGS) -o memory_test memory_test.o ../ladr/libladr.a -lm $(LADRLIBS)
@@ -88,19 +91,11 @@ memory_test: memory_test.o
 #   mace4_soundness.sh - every model Mace4 reports really does satisfy the
 #                        input clauses (checked independently by clausetester)
 # Each accepts a bin directory, e.g.  ./regress.sh /path/to/other/bin
-check: strbuf_test memory_test arity_test varnum_test bool_test multiset_test glist_test
-	./arity_test
-	./varnum_test
-	./bool_test
-	./multiset_test
-	./glist_test
-	./features_test
-	./arity_check_test.sh
-	./strbuf_test
-	./memory_test
-	./discrim_test
-	./regress.sh
-	./mace4_soundness.sh
+# 'check' used to carry its own copy of both tiers' lists, and ran
+# features_test and discrim_test without naming them as prerequisites -- the
+# same defect that made tier1 fail on a clean checkout.  Two lists that have
+# to agree do not stay in agreement, so it is an alias now.
+check: tier2
 
 # Two tiers, split where the cost actually jumps.
 #
@@ -173,9 +168,11 @@ audit:
 	fi; \
 	echo "ok:   every .sh in test.src is reached by a target"
 
-tier1: arity_test varnum_test bool_test multiset_test glist_test features_test
+tier1: arity_test varnum_test bool_test multiset_test glist_test features_test \
+       intpower_test
 	@$(MAKE) --no-print-directory audit
 	./arity_test
+	./intpower_test
 	./varnum_test
 	./bool_test
 	./multiset_test
@@ -220,6 +217,19 @@ ab:
 	fi
 	./ab.sh aa
 	B="$(BASELINE)" ./ab.sh ab
+
+# Promote rc to master, refusing unless master's tree will be identical to the
+# tree the gates ran against.  See the comments in promote.sh: tree identity
+# is the invariant, not whether the merge fast-forwarded.
+#
+#   make promote GATED=$(git -C /path/to/gated/worktree rev-parse HEAD)
+
+promote:
+	@if [ -z "$(GATED)" ]; then \
+	  echo "make promote needs GATED=<the commit the gates ran against>"; \
+	  exit 2; \
+	fi
+	./promote.sh "$(GATED)"
 
 tier3:
 	@if [ -z "$(CORPUS)" ]; then \

@@ -184,10 +184,22 @@ int int_power(int n, int exp)
     int i;
     int r = 1;
     for (i = 0; i < exp; i++) {
-      int x = r * n;
-      if (x < r)
-	return INT_MAX;  /* overflow */
-      r = x;
+      /* Detect the overflow before committing it, in a type that cannot
+         itself overflow: two ints multiplied always fit a long long.
+
+         The previous test multiplied first and then asked whether the result
+         had come out smaller -- "int x = r * n; if (x < r)".  That is signed
+         overflow, which is undefined behaviour, so a compiler is entitled to
+         assume it cannot happen and drop the check.  It was also simply
+         wrong, at every optimisation level: it only fires when the wrapped
+         value happens to land below the previous one.  int_power(10,10)
+         returned 1410065408 -- 10^10 modulo 2^32 -- instead of saturating,
+         because 1410065408 is larger than the 10^9 it came from.  That value
+         then reaches callers in interp.c as an array size and a loop bound. */
+      long long x = (long long) r * (long long) n;
+      if (x > INT_MAX || x < INT_MIN)
+	return INT_MAX;  /* saturate, as this function's contract says */
+      r = (int) x;
     }
     return r;
   }
@@ -275,6 +287,8 @@ Interp compile_interp(Term t, BOOL allow_incomplete)
   p->tables  = malloc(p->num_tables * sizeof(int *));
   p->types   = malloc(p->num_tables * sizeof(int));
   p->arities = malloc(p->num_tables * sizeof(int));
+  if (p->tables == NULL || p->types == NULL || p->arities == NULL)
+    fatal_error("compile_interp, out of memory");
 
   for (i = 0; i < p->num_tables; i++) {
     p->tables[i] = NULL;
@@ -298,10 +312,14 @@ Interp compile_interp(Term t, BOOL allow_incomplete)
     symnum = SYMNUM(ARG(f,0));
     arity = ARITY(ARG(f,0));
 
-    /* n = domain_size^arity */
+    /* n = domain_size^arity, through int_power() so that an arity which
+       cannot be tabulated saturates instead of wrapping.  This loop used to
+       be a bare "n = n * domain_size", with no check of any kind, and the
+       result went straight into malloc(n * sizeof(int)). */
 
-    for (j = 0, n = 1; j < arity; j++)
-      n = n * domain_size;
+    n = int_power(domain_size, arity);
+    if (n == INT_MAX)
+      fatal_error("compile_interp, domain_size^arity is too large to tabulate");
 
     lst = ARG(f,1);
     if (listterm_length(lst) != n)
@@ -311,6 +329,8 @@ Interp compile_interp(Term t, BOOL allow_incomplete)
     p->types[symnum] = (function ? FUNCTION : RELATION);
     p->arities[symnum] = arity;
     p->tables[symnum] = malloc(n * sizeof(int));
+    if (p->tables[symnum] == NULL)
+      fatal_error("compile_interp, out of memory for a symbol's table");
     table = p->tables[symnum];
 
     for (j = 0; j < n; j++, lst = ARG(lst,1)) {
