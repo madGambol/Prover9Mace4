@@ -357,14 +357,20 @@ still at 100 — which 17 of 40 sampled FATAL problems hit.
 ## 8. Reproducing any of it
 
 ```sh
-git clone <this repo> && cd Prover9Mace4
+git clone https://mirror.invalid/Prover9Mace4.git
+cd Prover9Mace4
 make all                                  # builds to ./bin
 git worktree add --detach /tmp/base 7f94204 && (cd /tmp/base && make all)
 make -C test.src tier2 BASELINE=/tmp/base/bin
 ```
 
-The TPTP work needs the library and the corpus repo, which carry the sweep
-drivers, the scored results and the analysis tools:
+The TPTP work needs two more things, neither of them in this repository: the
+TPTP library itself (v9.3.1, <https://www.tptp.org>) and the corpus repo, which
+carries the sweep drivers, the scored results and the analysis tools:
+
+```sh
+git clone https://mirror.invalid/Prover9Corpus.git prover9-corpus
+```
 
 - `prover9-corpus/baseline_ab.sh` — the capability A/B, interleaved
 - `prover9-corpus/cross_feed.sh` — attribute a change to the input or the prover

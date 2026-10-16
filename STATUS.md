@@ -379,8 +379,17 @@ Roughly in order of expected value.
 
 10. **A `tptp_pre.sh` shim** would rescue roughly 274 further translation
    failures; never built.
-10. **Publication** — upstreaming to `AlgorithmicTruth/Prover9`, GPL-2 §2(a)
-   per-file notices, GitHub.
+
+11. **Publication** — done, with one piece deliberately dropped. This tree is
+   at `chris/Prover9Mace4` and the corpus at `chris/Prover9Corpus` on the
+   local Forgejo (`mirror.invalid`), `master` and `rc` aligned.
+   GPL-2 §2(a) per-file change notices are in place — 91 files, see
+   `LICENSING.md` for the convention and for what was deliberately left alone.
+   Upstreaming to `AlgorithmicTruth/Prover9` was **dropped**: without a total
+   summary showing a real net improvement it does not earn a pull request, and
+   `RESULTS.md` reports a net loss of answers at a fixed budget. The three
+   fixes that would have gone up (T4, M10, M12) are prepared on a branch in
+   `~/Projects/Ladr-2026/src` with `PR.md` beside it, if that ever changes.
 
 ## Things that have cost real time, worth not repeating
 
