@@ -3064,6 +3064,24 @@ modal-logic problem really produces at domain size 2) and the ones that must
 saturate (`3^29`, the same arity one domain size larger). Against the pristine
 build it reports 3 failures.
 
+**Every call site was then audited**, because the fix changes what callers
+receive: `INT_MAX` where they used to get a wrapped number, which would be a
+regression at any site that used it as an allocation size. None does. One —
+`compile_interp` — allocates, and it now refuses a saturated size. The other
+five use it as a **loop bound over an already-allocated table**
+(`interp.c:658, 960, 1061, 1106, 2248`), so a saturated value cannot become a
+large `malloc`; and `eval_literals_false_instances` (`interp.c:1346`) uses it
+in a subtraction but **has no callers at all**, like `init_pair_index` in
+`pindex.c`.
+
+That audit turned up a bonus. Before the fix, `compile_interp` sized the table
+with its own bare multiply loop while those five sites computed the bound with
+`int_power` — two different pieces of arithmetic for the same quantity, one
+wrapping and one saturating, so for a table large enough they **disagreed**.
+A loop bound that exceeds the allocation it walks is an out-of-bounds read.
+Both now go through the one function, and the case where they could not agree
+is refused outright.
+
 **Why this was missed by everything else.** The sanitizer sweep runs with
 UBSan, which detects signed overflow — but only on inputs that reach it, and
 no corpus problem drives an interpretation table past 2^31 entries. The A/B
