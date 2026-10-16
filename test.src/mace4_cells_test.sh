@@ -198,6 +198,50 @@ else
   fail=$((fail + 1))
 fi
 
+# (c3) max_megs must bound GROUND-CLAUSE GENERATION, which happens before the
+#      first search node.
+#
+#      Mace4 calls disable_max_megs() because it "does its own max_megs
+#      check" -- and that check is in check_time_memory(), called from the top
+#      of search().  Everything mace4n() does before search() was therefore
+#      unbounded: generate_ground_clauses() instantiates every clause over the
+#      domain, three passes, and at a large domain size that is where the
+#      memory goes.  With LADR's check off and Mace4's not yet reachable, the
+#      only ceiling was the operating system's.
+#
+#      Measured on the 300 s TPTP sweep: of 59 FATAL runs, 38 died as "palloc,
+#      operating system is out of memory" rather than at their stated 2000 MB
+#      max_megs, every one during "DOMAIN SIZE n" before searching.  Uncapped
+#      and run many-wide, that is what exhausts a machine's swap.
+#
+#      The input below is two clauses with eight distinct variables, forced to
+#      domain size 10 with -n/-N: 10^8 ground instances per clause, which no
+#      20 MB ceiling can hold.  Against pristine and against the build with
+#      only the cell-table and negprop fixes, this exits 1 with "palloc,
+#      operating system is out of memory"; it must exit 7 and say what it was
+#      doing.
+{
+  echo 'assign(max_megs,20).'
+  echo 'assign(max_seconds,60).'
+  echo 'formulas(sos).'
+  echo 'p(x1,x2) | p(x3,x4) | p(x5,x6) | p(x7,x8) | q(x1,x3,x5,x7).'
+  echo '-p(x1,x2) | -q(x1,x2,x3,x4) | r(x3,x4).'
+  echo 'end_of_list.'
+} > "$tmp/ground.in"
+out=$tmp/groundout
+"$MACE4" -n 10 -N 10 -f "$tmp/ground.in" > "$out" 2>&1
+rc=$?
+if [ "$rc" -eq 7 ] && grep -q 'before the search could proceed' "$out"; then
+  echo "ok:   max_megs bounds ground-clause generation, before the first search node"
+elif [ "$rc" -eq 1 ] && grep -q 'operating system is out of memory' "$out"; then
+  echo "FAIL: ground-clause generation ran to the OS limit -- max_megs is not"
+  echo "      enforced before search() again (disable_max_megs is back?)"
+  fail=$((fail + 1))
+else
+  echo "FAIL: expected exit 7 naming the pre-search phase, got $rc"
+  fail=$((fail + 1))
+fi
+
 # (d) A table that does fit must still be searched exactly as before, or the
 #     guard has broken ordinary model finding.  Two unary predicates over a
 #     domain of 2 is 4 cells; Mace4 must find a model and exit 0.
