@@ -17,6 +17,7 @@
 */
 
 #include "msearch.h"
+#include <unistd.h>   /* _exit, for the out-of-memory handler */
 #include "../ladr/banner.h"
 
 // #define DEBUG
@@ -50,6 +51,14 @@ int First_skolem_cell;
    max_megs check covers them.  Zero whenever no table is allocated. */
 
 static CellCountType Cell_table_bytes = 0;
+
+/* The same figure in megabytes.  mace_megs() is called from
+   check_time_memory(), which runs at the top of search() -- once per node of
+   the search tree -- so it must not divide.  Dividing there cost about 10%:
+   MGT108+1 found its model in 274 s of CPU before and then missed a 300 s
+   limit entirely. */
+
+static int Cell_table_megs = 0;
 
 /* Misc Variables*/
 
@@ -147,7 +156,7 @@ void init_mace_options(Mace_options opt)
   opt->selection_order   = init_parm("selection_order",  2,       0, 2);
   opt->selection_measure = init_parm("selection_measure",4,       0, 4);
   opt->increment         = init_parm("increment",        1,       1, INT_MAX);
-  opt->max_megs          = init_parm("max_megs",       500,      -1, INT_MAX);
+  opt->max_megs          = init_parm("max_megs",      1000,      -1, INT_MAX);
   opt->report_stderr     = init_parm("report_stderr",   -1,      -1, INT_MAX);
          
   opt->print_models           = init_flag("print_models",           TRUE);
@@ -223,6 +232,59 @@ char *exit_string(int code)
   }
   return message;
 }  /* exit_string */
+
+/*************
+ *
+ *   mace4_exit()
+ *
+ *************/
+
+/*************
+ *
+ *   mace4_max_megs_exit()
+ *
+ *   Where LADR's own max_megs check sends us.  Mace4 does its own check in
+ *   check_time_memory(), but that runs at the top of search() -- so nothing
+ *   bounded the work BEFORE the first search node, and that is exactly where
+ *   a large domain size explodes: generate_ground_clauses() instantiates
+ *   every clause over the domain in mace4n(), before search() is ever
+ *   called.  With LADR's check disabled for the whole run, those allocations
+ *   had no ceiling but the operating system's.
+ *
+ *   Measured on a 300 s TPTP sweep: 38 of 59 FATAL runs died as "palloc,
+ *   operating system is out of memory" rather than at their stated 2000 MB
+ *   max_megs, every one of them during "DOMAIN SIZE n" before searching.
+ *   Without an address-space cap that path consumes the machine, which is
+ *   how a sweep of these once exhausted all swap and cost a reboot.
+ *
+ *   So LADR's check stays on and lands here, where the run can still report
+ *   max_megs the way it would have from check_time_memory().
+ *
+ *************/
+
+static
+void mace4_max_megs_exit(void)
+{
+  static BOOL In_handler = FALSE;
+
+  /* This runs from inside palloc, so everything it does afterwards -- the
+     printf, the statistics in mace4_exit() -- can allocate and come straight
+     back here.  Unguarded, that recursion overflowed the stack and the run
+     died in SIGSEGV instead of reporting max_megs, which is worse than the
+     defect it was meant to fix.  So disarm the check first, and if we are
+     somehow re-entered anyway, leave without touching the allocator at all. */
+
+  if (In_handler)
+    _exit(MAX_MEGS_NO_EXIT);
+
+  In_handler = TRUE;
+  disable_max_megs();
+
+  printf("\n%% Out of memory (max_megs) before the search could proceed;"
+         " this is usually ground-clause generation at domain size %d.\n",
+         Domain_size);
+  mace4_exit(Total_models == 0 ? MAX_MEGS_NO_EXIT : MAX_MEGS_YES_EXIT);
+}  /* mace4_max_megs_exit */
 
 /*************
  *
@@ -472,6 +534,7 @@ void free_cell_tables(void)
   Domain = NULL;
   Number_of_cells = 0;
   Cell_table_bytes = 0;
+  Cell_table_megs  = 0;
 }  /* free_cell_tables */
 
 /*************
@@ -606,6 +669,7 @@ BOOL init_for_domain_size(void)
   }
 
   Cell_table_bytes = table_bytes;   /* now mace_megs() can see them */
+  Cell_table_megs  = (int) (table_bytes / (1024*1024));
 
   for (id = 0; id < Number_of_cells; id++) {
     struct cell *c = Cells + id;
@@ -789,7 +853,7 @@ int mace_megs(void)
 {
   return (megs_malloced() - Start_megs)
          + (estack_bytes() / (1024*1024))
-         + (int) (Cell_table_bytes / (1024*1024));
+         + Cell_table_megs;
 }  /* mace_megs */
 
 /*************
@@ -1061,6 +1125,7 @@ int mace4n(Plist clauses, int order)
   free(Cells);
   Cells = NULL;
   Cell_table_bytes = 0;
+  Cell_table_megs  = 0;
 
   for (i = 0; i < Domain_size; i++)
     zap_term(Domain[i]);
@@ -1141,7 +1206,14 @@ Mace_results mace4(Plist clauses, Mace_options opt)
   if (results == NULL)
     fatal_error("mace4, out of memory for the results structure");
 
-  disable_max_megs();  /* mace4 does its own max_megs check */
+  /* Mace4 keeps its own max_megs check in check_time_memory(), which counts
+     the estack and the cell tables that palloc cannot see.  LADR's check is
+     left ON as well, routed to mace4_max_megs_exit(), because mace4's own
+     runs only at the top of search() and therefore cannot bound
+     ground-clause generation.  Whichever ceiling is reached first wins, and
+     both report max_megs. */
+  set_max_megs(parm(opt->max_megs));   /* opt, not Opt: Opt is set below */
+  set_max_megs_proc(mace4_max_megs_exit);
   Start_seconds = user_seconds();
   Start_megs = megs_malloced();
 

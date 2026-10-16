@@ -32,7 +32,11 @@
 # WHY IT RUNS IN PARALLEL
 #   The first version was a serial loop, which on an 80-core machine left 79
 #   cores idle and would have taken hours.  The per-run budget is `ulimit -t`,
-#   CPU time, so it means the same thing with sixty runs in flight as with one.
+#   CPU time, so it does not turn queueing into a timeout the way a wall clock
+#   does.  It is not load-INVARIANT, though: CPU time is time on core, and
+#   under memory-bandwidth contention a process does less work per on-core
+#   second.  Measured here, the same binary on the same input varied 2x in CPU
+#   seconds with load, so do not use a loaded machine for a timing comparison.
 #
 # USAGE
 #   poison_sweep.sh CORPUS_LIST [BUILD_DIR] [JOBS]
