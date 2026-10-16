@@ -131,11 +131,107 @@ never reaches. They were found by a 5,171-problem sweep at a budget long
 enough for the behaviour to appear, and by reading its failures rather than
 counting them.
 
-## The capability question, and what is still unmeasured
+## The capability A/B, and what it found
 
-Every TPTP figure in this document is **absolute, not differential**: it was
-produced by a fixed build, so it says what this tree can do, not what the work
-added. Against pristine, only three things are established:
+**It has now been run, and it found a regression of this project's own.** The
+section below this one is the design and still applies; what follows is the
+result.
+
+First run: 8,996 problems, both provers, 10 s CPU, 4 GB per run, pristine
+`7f94204` against `ce7d848`, both builds interleaved in one shuffled queue.
+17,992 rows per build, every key paired.
+
+| category | pristine | current | delta |
+| --- | ---: | ---: | ---: |
+| **UNSOUND — wrong answers** | **99** | **0** | **−99** |
+| SIGSEGV | 103 | 0 | −103 |
+| FATAL | 421 | 138 | −283 |
+| translate-fail | 6,075 | 5,896 | −179 |
+| MAX_MEGS | 1 | 485 | +484 |
+| MAX_SECONDS | 6,205 | 6,839 | +634 |
+| CPU_KILL | 1,505 | 1,171 | −334 |
+| PROVED | 2,036 | 1,952 | −84 |
+| MODEL | 324 | 338 | +14 |
+| EXHAUSTED | 317 | 267 | −50 |
+
+**The soundness result.** Pristine produced **99 wrong answers on 99 distinct
+problems** — mace4 modelling a `Theorem` 44 times, prover9 proving a
+`CounterSatisfiable` 40, mace4 on `Unsatisfiable` 8, prover9 on `Satisfiable`
+7. This tree produces **none**. All 99 are mistranslations (T4), not prover
+defects, and the proof needs no logic: every TPTP `fof` formula is closed, so a
+free variable in the translated output is wrong on its face. Over the 288 FOF
+problems involved, pristine emits **1,168 formulas with a free variable** and
+this tree emits **0**. The LADR-2026 translator at `62ae6ff` emits the same
+1,168, so the defect is live upstream — a third item for the patch proposal in
+`~/Projects/Ladr-2026/REPRODUCTION.md`, alongside M10 and M12, and the most
+serious of the three because it returns wrong answers rather than exceeding a
+limit.
+
+Of pristine's 2,452 definite answers, **99 (4%) were wrong**. Of this tree's,
+none are.
+
+**The capability result, and the mistake not to make with it.** prover9's sound
+answers read 2,353 → 2,219, which looks like a 134-answer regression. It is
+not one of that size, because the two builds are not being asked the same
+question: a corrected translation is a **different** problem, usually a harder
+one, and losing it is the fix working. Separating the causes needs a
+**cross-feed** — all four combinations of {pristine, current} translation ×
+{pristine, current} prover, which is `prover9-corpus/cross_feed.sh`:
+
+| | pristine prover | current prover |
+| --- | ---: | ---: |
+| **pristine translation** | 205 answers | 190 |
+| **current translation** | 18 | 6 |
+
+Per problem: **186 of the 205 losses are the corrected input defeating both
+provers, 13 are the prover, 6 were noise.** The 13 bisected to `a88f027` and
+are written up as **R1** in `FIXES.md` — the child order of the discrimination
+index, fixed on `feature/discrim-child-order`. Quoting the 134 would have been
+wrong twice over: it overstates the regression tenfold and buries a real one.
+
+**What the gates could not see.** tier1, tier2, the 174-run corpus A/B, the
+determinism harness, ASan+UBSan on 336 pairs, poison on 336 and valgrind on
+168 were all green with R1 in the tree, because each asks whether this build
+still does what the last one did on inputs it already has. R1 is a capability
+loss on problems none of those sets contain. **Run the capability A/B per
+feature, not per release.**
+
+**translate-fail, broken out.** 3,038 distinct problems fail to translate on
+pristine and 2,948 here — 90 rescued, **0 new failures**. By TPTP language:
+
+| | problems | in LADR's scope? |
+| --- | ---: | --- |
+| higher-order (TH0 1,294, TH1 362, DH0 28, DH1 17, NH0 7) | **1,708** | no — LADR is first-order |
+| typed / extended first-order (TF0 759, TF1 136, TX0 107, TX1 50, NX0 102) | **1,154** | no — no type system, arithmetic or modal logic |
+| untyped first-order (FOF 157, CNF 19) | **176** | **yes** |
+
+So **56% is higher-order and 38% typed first-order**: 94% of the
+"translate-fail" count is out of scope by design, not a defect. Of the 176 that
+are in scope, this tree rescues **90** (75 FOF, 15 CNF). The 86 that remain:
+**32 CPU_KILL** (all CSR — the translator exceeds 120 s CPU on the SUMO/Cyc
+problems), **16 SIGSEGV** (13 CSR, 3 HWV — the recursive-descent parser
+exhausts the 8 MB stack; `TPTP_STACK` recovers them), **20 `read_term error`**
+(17 SEV, 2 BIO, 1 SYN) and **1** `Max_megs`. The 20 are a genuine open gap:
+every one of `SEV607+1`'s 2,361 formulas translates alone, and the first
+failing *prefix* is 180 formulas, so it is an interaction and not a syntax hole
+— unresolved, see "What is outstanding".
+
+**The narrow-index defect (T9) accounts for none of the 99.** It cannot: it
+raises `fatal_error("discrim_bind_delete, cannot find end")` and exits, which
+is a lost problem, never a wrong answer. Measured anyway: the largest of the
+99 problems has **511 distinct symbols** against T9's 32,767 boundary. 83
+problems in the sample *do* cross it (58 CSR, 22 HWV, 2 BIO, 1 NLP, the largest
+at 1,254,680 symbols), and none of them reached a verdict on either build — 74
+translate-fail both sides, 5 translate-fail → CPU_KILL, 4 CPU_KILL both sides.
+T9's value is for knowledge-base-scale input fed directly, which is where
+a large knowledge base sits, not for TPTP.
+
+## The design of the A/B, and what was previously unmeasured
+
+Every other TPTP figure in this document is **absolute, not differential**: it
+was produced by a fixed build, so it says what this tree can do, not what the
+work added. Before the A/B above, only three things were established against
+pristine:
 
 - **33 of 41** defect tests fail on pristine `7f94204` and pass here (tier2's
   `BASELINE=` gate).
@@ -162,6 +258,15 @@ and why.
 ## What is outstanding
 
 Roughly in order of expected value.
+
+0. **The capability A/B is now part of the gate, in principle and not yet in
+   the Makefile.** R1 is the argument: a change that keeps every existing test
+   green can still cost thirteen problems, and nothing short of running the
+   pristine comparison sees it. `make ab BASELINE=...` exists for the 174-run
+   corpus; what R1 needed was the 8,996-problem sample, which is an hour at 64
+   jobs. A per-feature tier between tier2 and the full sweep — say the 310
+   problems that have ever changed hands, plus the 13 — would have caught it in
+   minutes.
 
 1. **PF6 — `logic_term()` compares connective names.** It asks
    `is_term(t, and_sym(), 2)` and so on, resolving a symbol and comparing
@@ -263,7 +368,14 @@ Roughly in order of expected value.
 8. **`MAX_VARS`** is still 100, blocked by the `Context` arrays, the variable-ID
    stride multiplier, `compress.c`'s char assumption and `MAX_BASIS`. 17 of 40
    sampled FATAL TPTP problems hit it.
-9. **A `tptp_pre.sh` shim** would rescue roughly 274 further translation
+9. **The 20 `read_term error` translation failures** (17 SEV, 2 BIO, 1 SYN).
+   Every one of `SEV607+1`'s 2,361 formulas translates on its own; the first
+   failing prefix is 180 formulas, so it is an interaction, not a syntax hole.
+   These are Coq-exported set theory with quoted names containing `$`, `.` and
+   escaped quotes, all of which parse individually. Reproduce with
+   `prover9-corpus` and the binary search in the session notes.
+
+10. **A `tptp_pre.sh` shim** would rescue roughly 274 further translation
    failures; never built.
 10. **Publication** — upstreaming to `AlgorithmicTruth/Prover9`, GPL-2 §2(a)
    per-file notices, GitHub.
