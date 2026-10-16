@@ -2037,6 +2037,21 @@ Note also that PF3's 106x on the synthetic ladder is 1.12x here, because most
 of this problem's predicates are not eliminable and the cubic loop barely runs.
 A speedup measured on one input shape is a claim about that shape.
 
+**Re-measured after R1.** The ladder above was measured as each fix landed, and
+its last two rows predate R1 replacing PF10's hash table with a sorted array.
+Re-measured on an idle machine, three interleaved runs each, with the
+instrument first checked on a one-clause input (9 ms and 8 ms):
+
+| build | run 1 | run 2 | run 3 | median |
+| --- | ---: | ---: | ---: | ---: |
+| pristine `7f94204` | 153.9 s | 173.9 s | 162.8 s | **162.8 s** |
+| this tree, after R1 | 3.17 s | 3.15 s | 3.30 s | **3.17 s** |
+
+**51x**, against 41x before — the sorted array is slightly faster than the hash
+it replaced, not slower, and pristine's own figure moves between 153.9 s and
+173.9 s across three identical runs on an idle machine, which is why a single
+measurement of either side is not worth quoting.
+
 ### PF5 — forty list functions recursed once per element
 `ladr/glist.c`
 
@@ -3488,6 +3503,18 @@ CSR040-10 startup — and all 12 problems are answered again at pristine's times
 (SWV558-1.010 in 0.03 s, SWB006-10 exhausted in 3.50 s).  Verified by
 `prover9-corpus/cap_gate.sh`, which reports 10 lost against the unfixed build
 and 0 against this one.
+
+**What the re-run A/B says, and the part of it that is load and not code.**
+Re-running the whole 8,996-problem A/B against the fixed build moves prover9
+from 2,219 sound answers to 2,224 and the losses from 215 to 204, and shows
+**9 of the 12** recovered rather than all 12.  The other three -- SWB009-10,
+SWB022-10, SWB025-10 -- are `EXHAUSTED` **3 times out of 3 on an idle machine**
+at the same 10-second budget, and they need 3.4 to 4.8 CPU seconds to do it.
+Under a 64-job sweep that inflates past ten.  So the fix recovers all twelve
+and the sweep can only see nine of them, which is the load-sensitivity rule
+from "CPU time is not load-invariant" applying to this project's own headline
+figure.  The +5 rather than +12, likewise: a fix measured inside a saturated
+sweep is measured at a discount.
 
 **The test that was missing.** `test.src/discrim_test.c` passed throughout.
 Its three cases ask what the index *returns* for a symbol, which was always
