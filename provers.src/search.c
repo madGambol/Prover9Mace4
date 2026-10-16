@@ -200,7 +200,7 @@ Prover_options init_prover_options(void)
   p->max_given =        init_parm("max_given",            -1,     -1,INT_MAX);
   p->max_kept =         init_parm("max_kept",             -1,     -1,INT_MAX);
   p->max_proofs =       init_parm("max_proofs",            1,     -1,INT_MAX);
-  p->max_megs =         init_parm("max_megs",            500,     -1,INT_MAX);
+  p->max_megs =         init_parm("max_megs",           1000,     -1,INT_MAX);
   p->max_seconds =      init_parm("max_seconds",          -1,     -1,INT_MAX);
   p->max_minutes =      init_parm("max_minutes",          -1,     -1,INT_MAX);
   p->max_hours =        init_parm("max_hours",          -1,     -1,INT_MAX);

@@ -84,6 +84,12 @@ static size_t Bytes_palloced = 0;
 
 static size_t Bytes_external = 0;
 
+/* Bytes_external in megabytes, maintained as it changes.  megs_malloced() is
+   on Mace4's per-search-node path through mace_megs(), so it must not
+   divide; charge/discharge happen far less often than the figure is read. */
+
+static size_t Megs_external = 0;
+
 /* These are char* rather than void* because palloc() does arithmetic on
    them.  Arithmetic on void* is a GCC extension (it treats void as having
    size 1), not standard C: a conforming compiler is entitled to reject
@@ -346,8 +352,7 @@ int megs_malloced(void)
      MAX_MEM_LISTS pointers or more from get_mem()/get_cmem().  Leaving it
      out meant this figure, the "Total malloced" line built from it, and
      Mace4's own max_megs check were all blind to it. */
-  return Malloc_calls * MALLOC_MEGS
-         + (int) (Bytes_external / (1024 * 1024));
+  return Malloc_calls * MALLOC_MEGS + (int) Megs_external;
 }  /* megs_malloced */
 
 /*************
@@ -367,6 +372,7 @@ what it says.
 void charge_external_mem(size_t n)
 {
   Bytes_external += n;
+  Megs_external = Bytes_external / (1024 * 1024);
   if (Max_megs_check &&
       (size_t) Malloc_calls * MALLOC_MEGS
 	+ Bytes_external / (1024 * 1024) > (size_t) Max_megs) {
@@ -393,6 +399,7 @@ void discharge_external_mem(size_t n)
   /* Saturate rather than wrap: a mismatched pair is a bug, but a wrapped
      size_t here would make the ceiling unreachable and hide it. */
   Bytes_external = (Bytes_external >= n) ? Bytes_external - n : 0;
+  Megs_external = Bytes_external / (1024 * 1024);
 }  /* discharge_external_mem */
 
 /*************

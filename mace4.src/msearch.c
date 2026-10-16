@@ -51,6 +51,14 @@ int First_skolem_cell;
 
 static CellCountType Cell_table_bytes = 0;
 
+/* The same figure in megabytes.  mace_megs() is called from
+   check_time_memory(), which runs at the top of search() -- once per node of
+   the search tree -- so it must not divide.  Dividing there cost about 10%:
+   MGT108+1 found its model in 274 s of CPU before and then missed a 300 s
+   limit entirely. */
+
+static int Cell_table_megs = 0;
+
 /* Misc Variables*/
 
 int Domain_size;
@@ -147,7 +155,7 @@ void init_mace_options(Mace_options opt)
   opt->selection_order   = init_parm("selection_order",  2,       0, 2);
   opt->selection_measure = init_parm("selection_measure",4,       0, 4);
   opt->increment         = init_parm("increment",        1,       1, INT_MAX);
-  opt->max_megs          = init_parm("max_megs",       500,      -1, INT_MAX);
+  opt->max_megs          = init_parm("max_megs",      1000,      -1, INT_MAX);
   opt->report_stderr     = init_parm("report_stderr",   -1,      -1, INT_MAX);
          
   opt->print_models           = init_flag("print_models",           TRUE);
@@ -472,6 +480,7 @@ void free_cell_tables(void)
   Domain = NULL;
   Number_of_cells = 0;
   Cell_table_bytes = 0;
+  Cell_table_megs  = 0;
 }  /* free_cell_tables */
 
 /*************
@@ -606,6 +615,7 @@ BOOL init_for_domain_size(void)
   }
 
   Cell_table_bytes = table_bytes;   /* now mace_megs() can see them */
+  Cell_table_megs  = (int) (table_bytes / (1024*1024));
 
   for (id = 0; id < Number_of_cells; id++) {
     struct cell *c = Cells + id;
@@ -789,7 +799,7 @@ int mace_megs(void)
 {
   return (megs_malloced() - Start_megs)
          + (estack_bytes() / (1024*1024))
-         + (int) (Cell_table_bytes / (1024*1024));
+         + Cell_table_megs;
 }  /* mace_megs */
 
 /*************
@@ -1061,6 +1071,7 @@ int mace4n(Plist clauses, int order)
   free(Cells);
   Cells = NULL;
   Cell_table_bytes = 0;
+  Cell_table_megs  = 0;
 
   for (i = 0; i < Domain_size; i++)
     zap_term(Domain[i]);
