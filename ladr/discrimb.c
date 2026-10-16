@@ -288,7 +288,7 @@ Discrim discrim_bind_insert_rec(Term t, Discrim d)
 	d2 = get_discrim();
 	d2->type = DRIGID;
 	d2->symbol = symbol;
-	discrim_child_append(d, d2);   /* links it and indexes it */
+	discrim_child_insert(d, d2);   /* links it IN ORDER and indexes it */
 	d1 = d2;
 	d2 = NULL;                     /* already linked; do not link again */
       }

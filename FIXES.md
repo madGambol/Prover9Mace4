@@ -2037,6 +2037,21 @@ Note also that PF3's 106x on the synthetic ladder is 1.12x here, because most
 of this problem's predicates are not eliminable and the cubic loop barely runs.
 A speedup measured on one input shape is a claim about that shape.
 
+**Re-measured after R1.** The ladder above was measured as each fix landed, and
+its last two rows predate R1 replacing PF10's hash table with a sorted array.
+Re-measured on an idle machine, three interleaved runs each, with the
+instrument first checked on a one-clause input (9 ms and 8 ms):
+
+| build | run 1 | run 2 | run 3 | median |
+| --- | ---: | ---: | ---: | ---: |
+| pristine `7f94204` | 153.9 s | 173.9 s | 162.8 s | **162.8 s** |
+| this tree, after R1 | 3.17 s | 3.15 s | 3.30 s | **3.17 s** |
+
+**51x**, against 41x before — the sorted array is slightly faster than the hash
+it replaced, not slower, and pristine's own figure moves between 153.9 s and
+173.9 s across three identical runs on an idle machine, which is why a single
+measurement of either side is not worth quoting.
+
 ### PF5 — forty list functions recursed once per element
 `ladr/glist.c`
 
@@ -3350,3 +3365,173 @@ in the LADR Changelog file (`../Changelog`)"). `ladr/Changelog.old` is also
 where the TPTP relationship first appears: *"May 18, 2004. Soundness bug from
 Geoff Sutcliffe. CNF transformation... Since this is a serious bug, a new
 release will be made today."*
+
+## R1: a regression this project introduced, and how it was caught
+
+This is the project's own defect, not upstream's, and it is recorded here on
+the same terms as the rest: what broke, how it was found, what the measurement
+said, and what the fix is.
+
+### R1 — the discrimination child index reordered the children, and twelve problems stopped being proved
+`ladr/discrim.c`, `ladr/discrim.h`, introduced by `a88f027` (PF10)
+
+**How it surfaced.** Not by a test. The first capability A/B against the
+pristine 2009 release — 8,996 TPTP problems, both provers, 10 s CPU, both
+builds interleaved in one queue — reported prover9's sound answers down from
+2,353 to 2,219. 215 (prover, problem) pairs changed hands the wrong way
+against 95 the right way, and 206 of the losses were `MAX_SECONDS`. Every
+gate in the tree was green at the time.
+
+**Separating the input from the prover.** Of the 215 losses, re-running each
+one five times per build, interleaved, said 206 were STABLE and 9 were noise —
+so it was not the 10 s boundary. The question left was whether the prover had
+slowed down or the problem had changed, because this tree also fixed the
+translator (T4), and a corrected formula is a different, usually harder,
+problem. That is answerable by **cross-feeding**: run each of the four
+combinations of {pristine, current} translation × {pristine, current} prover
+on the same 205 prover9 losses.
+
+| | pristine prover | current prover |
+| --- | ---: | ---: |
+| **pristine translation** | 205 answers | 190 |
+| **current translation** | 18 | 6 |
+
+Read down a column and the translation accounts for almost all of it; read
+across a row and the prover accounts for 15. Per problem: **187 of 205 losses
+are the corrected input defeating both provers, 12 are the prover, 6 were
+noise.** The 12 are the defect.
+
+One of the 13 the first pass attributed to the prover was itself a boundary
+flip, and it is worth recording because it is the same trap the cross-feed is
+meant to avoid. `NUM/NUM556+3` proves in 0.03 s on the OLD translation under
+either prover; on the corrected one pristine takes **14.78 s** and this tree
+**12.31 s** — this tree is faster, and both exceed the 10 s budget. The single
+10 s rep that recorded pristine proving it was load-lucky. The cross-feed is
+run at one rep per cell, so its PROVER column needs the same reps-and-
+interleaving discipline as everything else before a cell is believed; the
+surviving twelve were confirmed by `cap_gate.sh` against both builds.
+
+**It was not a slowdown.** At a 300 s budget, on the *same* input, with two
+reps each:
+
+```
+  Problems/SWV/SWV558-1.010.p   pristine PROVED  0.03 s     current MAX_MEGS  79.20 s
+  Problems/SWV/SWV543-1.010.p   pristine PROVED  2.26 s     current MAX_MEGS 106.58 s
+  Problems/SWB/SWB006-10.p      pristine EXHAUSTED 4.04 s   current MAX_MEGS  78.78 s
+  Problems/SYN/SYN193-10.p      pristine PROVED  0.39 s     current MAX_MEGS 293.16 s
+```
+
+A 0.03 s proof becoming 2 GB of memory exhausted after 79 s is a different
+error mode, not a slower one.
+
+**What `git bisect` said.** Over the 106 commits from `7f94204` to `858075d`,
+with "proves SWV558-1.010 inside 20 s and 500 MB" as the test: first bad commit
+`a88f027`, *"Give discrimination-tree nodes a symbol-keyed child index
+(1.93x)"*. That commit's own message ends:
+
+> The 174-run corpus A/B is NOT yet run for this change and is required before
+> it reaches rc: making indexed children unsorted changes which answer
+> `discrim_bind_retrieve_first` returns first, so it can change which
+> demodulator is applied.
+
+The defect was predicted in writing by the commit that introduced it, and the
+precondition was never run. **A precondition recorded in a commit message is
+not a gate.** `make promote` enforces tree identity; nothing enforced this.
+
+**What was actually wrong, measured rather than reasoned about.** The statistics
+name the mechanism. Same problem, same input, same 47 given clauses:
+
+```
+  pristine   Given=47. Generated=723.     Kept=521.     proofs=1.  Forward_subsumed=201.
+  current    Given=47. Generated=1052629. Kept=1052475. proofs=0.  Forward_subsumed=154.
+```
+
+Forward subsumption stops catching things and the clause set runs away. Two
+instrumented builds ruled out the obvious causes:
+
+* the index was cross-checked on every lookup against an **order-independent
+  linear scan of the very list it indexes** — over 4 million lookups in one
+  run, **zero divergences**, in both directions;
+* the `parent` node threaded through the `Flat2` frames was checked to be a
+  node that actually owns the child list being searched — **zero violations**.
+
+So the index was faithful and the lookups were right. What changed was the
+**order**. `discrim_child_append` put a new rigid child at the tail, because
+appending is O(1) and splicing into a sorted list is O(fan-out). Retrieval
+genuinely does not walk the rigid list — it looks the symbol up — but the list
+order is the order of the depth-first walk over the tree, and therefore the
+order in which `discrim_bind_retrieve_first()` hands back equally-matching
+answers. Demodulation and forward subsumption each take the **first** answer.
+A different demodulator is a different normal form, and two clauses that would
+have subsumed each other no longer look alike.
+
+Restoring the order reproduces pristine exactly, to the clause:
+`Given=47 Generated=723 Kept=521 Forward_subsumed=201 THEOREM PROVED`.
+
+**Fix — and the hash table is gone.** The order is not a property this code may
+trade away, so an unordered container was the wrong structure to hold it. The
+index is now the same children **sorted by symbol in an array**: lookup is a
+binary search, insertion is a binary search plus one `memmove`, and neither
+walks the fan-out. The invariant is in the data structure rather than in a
+comment above it — there is nowhere to put an out-of-order child. That deletes
+the open-addressed hash table it replaces: `di_hash`, `di_probe`, `di_put`,
+`di_grow`, the tombstones, the load factor and the two sentinels, about 150
+lines.
+
+One detail is worth keeping because it is the whole margin. The keys are stored
+**inline** in a parallel `int32_t` array rather than read through the child
+pointer. A binary search over 300 children is eight steps; eight contiguous
+int32 loads are a cache line or two, while eight `ix->kid[mid]->symbol` loads
+are eight dependent misses into scattered nodes. Measured on CSR040-10
+startup: keys inline **5.0 s**, keys behind the pointer **6.5 s**.
+
+**Cost of keeping the order: none.** Unloaded and interleaved, three runs each:
+
+```
+  CSR040-10 startup        unsorted+hash  5232 5048 5065 ms
+                           sorted array   4838 5206 4778 ms
+                           no index (pristine)        ~60 s
+
+  ladder, n clauses over 2n symbols
+      8,000 symbols        unsorted+hash   189 ms   sorted array   198 ms   pristine   5,533 ms
+     16,000 symbols        unsorted+hash   906 ms   sorted array   893 ms   pristine  23,789 ms
+     32,000 symbols        unsorted+hash  4681 ms   sorted array  4703 ms   pristine 111,578 ms
+```
+
+PF10's speedup is intact — 24x to 28x over pristine on the ladder, 12x on
+CSR040-10 startup — and all 12 problems are answered again at pristine's times
+(SWV558-1.010 in 0.03 s, SWB006-10 exhausted in 3.50 s).  Verified by
+`prover9-corpus/cap_gate.sh`, which reports 10 lost against the unfixed build
+and 0 against this one.
+
+**What the re-run A/B says, and the part of it that is load and not code.**
+Re-running the whole 8,996-problem A/B against the fixed build moves prover9
+from 2,219 sound answers to 2,224 and the losses from 215 to 204, and shows
+**9 of the 12** recovered rather than all 12.  The other three -- SWB009-10,
+SWB022-10, SWB025-10 -- are `EXHAUSTED` **3 times out of 3 on an idle machine**
+at the same 10-second budget, and they need 3.4 to 4.8 CPU seconds to do it.
+Under a 64-job sweep that inflates past ten.  So the fix recovers all twelve
+and the sweep can only see nine of them, which is the load-sensitivity rule
+from "CPU time is not load-invariant" applying to this project's own headline
+figure.  The +5 rather than +12, likewise: a fix measured inside a saturated
+sweep is measured at a discount.
+
+**The test that was missing.** `test.src/discrim_test.c` passed throughout.
+Its three cases ask what the index *returns* for a symbol, which was always
+right; none asked what *order* the children are in. There is now a public
+`discrim_children_ordered()` that walks a whole tree and asserts the invariant
+— rigid children ascending by symbol, variable children all in front — and two
+new cases that insert 400 symbols in a fixed scramble (stride 137 over 400,
+coprime, so it visits every slot and lands nowhere near sorted) and then delete
+every third one. Against the unfixed tree both **FAIL**; against the fix both
+pass. A test that does not fail on the defect it is named for is not evidence.
+
+**What this says about the gates.** tier1, tier2, the 174-run corpus A/B, the
+determinism harness, ASan+UBSan on 336 pairs, the poison sweep on 336 and
+valgrind on 168 were all green with this defect in the tree. None of them can
+see it, because every one of them asks "does this build still do what the
+previous build did on these inputs" and the answer was yes — the defect is a
+*capability* loss on problems none of those sets contain. The capability A/B
+against the pristine release is the only instrument here that found it, and it
+is the one that had never been run until now. It is worth running per feature,
+not per release.

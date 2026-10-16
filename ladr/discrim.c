@@ -168,124 +168,131 @@ void p_discrim_mem(void)
  *************/
 
 /* A node's rigid children are a sorted linked list, and both insertion and
-   retrieval find the right one by walking it, so each costs the fan-out at
+   retrieval found the right one by WALKING it, so each cost the fan-out at
    that node.  On Problems/CSR/CSR040-10.p that is 105.9 million sibling steps
    in one run, 91% of them at depths 1 and 2 -- the arguments of the top-level
    symbol -- where nodes average 269 and 288 steps per visit.
- 
-   This index makes that lookup O(1).  It does NOT replace the list: retrieval
-   pushes `d->next` as its backtracking alternatives, so the order is load
-   bearing, and the list is left exactly as it was.  The index only lets the
-   forward scan be skipped.
- 
-   Open addressing with linear probing.  Symbol numbers are positive, so the
-   two sentinels are negative and cannot collide with a real key.  Deletion
-   leaves a tombstone rather than shifting, because a backward shift would
-   have to re-probe every key in the run. */
 
-#define DI_EMPTY  INT32_MIN
-#define DI_TOMB   (INT32_MIN + 1)
+   WHAT THIS IS, AND WHY IT IS NOT A HASH TABLE
+   It is the same children, SORTED BY SYMBOL, in an array.  Lookup is a binary
+   search and insertion is a binary search plus one memmove of pointers, so
+   neither walks the fan-out, and the array's order IS the list's order.
+
+   It was a hash table first -- open addressing, tombstones, load factor,
+   rehash, about 150 lines -- on the argument that the order of the children
+   was no longer read by anything, so an unordered container was free to hold
+   them and new children could be appended in O(1).  That argument was wrong,
+   and the way it was wrong is worth keeping: retrieval does not walk the
+   rigid list, but the list order is the order of the depth-first walk over
+   the tree, hence the order in which discrim_bind_retrieve_first() returns
+   equally-matching answers, and demodulation and forward subsumption each
+   take the FIRST answer.  Reordering the children changed which demodulator
+   was applied.  Thirteen corpus problems stopped being proved; on
+   Problems/SWV/SWV558-1.010.p a 0.03 s proof became 2 GB exhausted after 79 s
+   of search.  See the note above discrim_child_insert() for the measurements.
+
+   So the order is not a property this code may trade away, and an unordered
+   container was the wrong structure for it.  A sorted array states the
+   invariant in the data structure rather than in a comment above it: there is
+   nowhere to put an out-of-order child.  It is also less code than the hash
+   it replaces, and O(log n) against O(1) is not measurable here -- CSR040-10
+   startup is 5.07 s either way, against 60 s with no index at all. */
 
 /* Build the index once a node has this many rigid children.  Below it the
-   list walk is cheaper than a hash probe and the memory is not worth it;
-   measured fan-outs that matter here are in the hundreds. */
+   list walk is cheaper than a binary search plus the array, and the memory is
+   not worth it; measured fan-outs that matter here are in the hundreds. */
 #define DI_PROMOTE_AT 32
 
+/* Two parallel arrays rather than one of structs, and the KEYS ARE INLINE
+   rather than read through the child pointer.  That is the difference between
+   a binary search that touches eight contiguous int32s -- a cache line or two
+   of the key array -- and one that makes eight dependent pointer loads into
+   scattered nodes.  Measured on CSR040-10 startup, keys inline is 5.1 s and
+   keys behind the pointer is 6.5 s, which is the whole of the margin against
+   the hash table this replaced. */
 struct discrim_index {
-  int32_t *key;        /* capacity entries: a symbol, DI_EMPTY, or DI_TOMB */
-  Discrim *node;       /* capacity entries, parallel to key */
-  Discrim  tail;       /* last rigid child, so appending is O(1) */
-  int capacity;        /* a power of two, so mask == capacity - 1 */
-  int live;            /* real keys */
-  int filled;          /* real keys + tombstones, for the load factor */
+  int32_t *sym;        /* the rigid children's symbols, SORTED, ASCENDING */
+  Discrim *kid;        /* the children themselves, parallel to sym */
+  int nkid;            /* how many */
+  int kidcap;          /* allocated */
 };
 
 static unsigned Discrim_index_gets = 0, Discrim_index_frees = 0;
 
-/* Knuth multiplicative, keeping the bits the multiply actually mixes. */
-static int di_hash(int32_t symbol, int capacity)
+/* Position of the first child whose symbol is not less than `symbol`, i.e.
+   where `symbol` belongs.  A binary search: the whole point of the array. */
+static int di_pos(struct discrim_index *ix, int32_t symbol)
 {
-  unsigned h = (unsigned) symbol * 2654435761u;
-  return (int) ((h >> 4) & (unsigned) (capacity - 1));
-}
-
-/* The slot holding `symbol`, or the slot where it belongs.  Never fills, so
-   the probe always terminates; a tombstone is not a stopping point for a
-   lookup, only a reusable slot for an insert. */
-static int di_probe(struct discrim_index *ix, int32_t symbol)
-{
-  int mask = ix->capacity - 1;
-  int h = di_hash(symbol, ix->capacity);
-  int first_tomb = -1;
-  while (ix->key[h] != DI_EMPTY) {
-    if (ix->key[h] == symbol)
-      return h;
-    if (ix->key[h] == DI_TOMB && first_tomb < 0)
-      first_tomb = h;
-    h = (h + 1) & mask;
+  int lo = 0, hi = ix->nkid;
+  while (lo < hi) {
+    int mid = lo + (hi - lo) / 2;
+    if (ix->sym[mid] < symbol)
+      lo = mid + 1;
+    else
+      hi = mid;
   }
-  return first_tomb >= 0 ? first_tomb : h;
+  return lo;
 }
 
-static void di_put(struct discrim_index *ix, int32_t symbol, Discrim child);
-
-static void di_grow(struct discrim_index *ix, int new_capacity)
+static void di_reserve(struct discrim_index *ix, int want)
 {
-  int32_t *old_key = ix->key;
-  Discrim *old_node = ix->node;
-  int old_capacity = ix->capacity;
-  int k = 0;
-
-  ix->key = (int32_t *) get_mem(PTRS(new_capacity * sizeof(int32_t)));
-  ix->node = (Discrim *) get_mem(PTRS(new_capacity * sizeof(Discrim)));
-  ix->capacity = new_capacity;
-  ix->live = 0;
-  ix->filled = 0;
-  for (k = 0; k < new_capacity; k++) {
-    ix->key[k] = DI_EMPTY;
-    ix->node[k] = NULL;
-  }
-  for (k = 0; k < old_capacity; k++)
-    if (old_key[k] != DI_EMPTY && old_key[k] != DI_TOMB)
-      di_put(ix, old_key[k], old_node[k]);
-
-  free_mem(old_key, PTRS(old_capacity * sizeof(int32_t)));
-  free_mem(old_node, PTRS(old_capacity * sizeof(Discrim)));
-}
-
-static void di_put(struct discrim_index *ix, int32_t symbol, Discrim child)
-{
-  int h = di_probe(ix, symbol);
-  if (ix->key[h] == symbol) {
-    ix->node[h] = child;          /* already present: just retarget */
+  int32_t *old_sym = NULL;
+  Discrim *old_kid = NULL;
+  int old_cap = 0;
+  if (want <= ix->kidcap)
     return;
+  old_sym = ix->sym;
+  old_kid = ix->kid;
+  old_cap = ix->kidcap;
+  while (ix->kidcap < want)
+    ix->kidcap = (ix->kidcap == 0) ? DI_PROMOTE_AT * 2 : ix->kidcap * 2;
+  ix->sym = (int32_t *) get_mem(PTRS(ix->kidcap * sizeof(int32_t)));
+  ix->kid = (Discrim *) get_mem(PTRS(ix->kidcap * sizeof(Discrim)));
+  if (old_cap > 0) {
+    memcpy(ix->sym, old_sym, old_cap * sizeof(int32_t));
+    memcpy(ix->kid, old_kid, old_cap * sizeof(Discrim));
+    free_mem(old_sym, PTRS(old_cap * sizeof(int32_t)));
+    free_mem(old_kid, PTRS(old_cap * sizeof(Discrim)));
   }
-  if (ix->key[h] == DI_EMPTY)
-    ix->filled++;                 /* reusing a tombstone does not add one */
-  ix->key[h] = symbol;
-  ix->node[h] = child;
-  ix->live++;
-  /* Keep the load factor at or below one half, counting tombstones: linear
-     probing degrades sharply as a table fills. */
-  if (ix->filled * 2 >= ix->capacity)
-    di_grow(ix, ix->capacity * 2);
 }
 
-static struct discrim_index *di_new(int capacity)
+static void di_insert_at(struct discrim_index *ix, int pos, Discrim child)
+{
+  di_reserve(ix, ix->nkid + 1);
+  if (pos < ix->nkid) {
+    memmove(&ix->sym[pos+1], &ix->sym[pos],
+	    (ix->nkid - pos) * sizeof(int32_t));
+    memmove(&ix->kid[pos+1], &ix->kid[pos],
+	    (ix->nkid - pos) * sizeof(Discrim));
+  }
+  ix->sym[pos] = child->symbol;
+  ix->kid[pos] = child;
+  ix->nkid++;
+}
+
+static void di_remove(struct discrim_index *ix, Discrim child)
+{
+  int pos = di_pos(ix, child->symbol);
+  if (pos >= ix->nkid || ix->kid[pos] != child)
+    return;                       /* not there; nothing to undo */
+  if (pos + 1 < ix->nkid) {
+    memmove(&ix->sym[pos], &ix->sym[pos+1],
+	    (ix->nkid - pos - 1) * sizeof(int32_t));
+    memmove(&ix->kid[pos], &ix->kid[pos+1],
+	    (ix->nkid - pos - 1) * sizeof(Discrim));
+  }
+  ix->nkid--;
+}
+
+static struct discrim_index *di_new(void)
 {
   struct discrim_index *ix =
     (struct discrim_index *) get_mem(PTRS(sizeof(struct discrim_index)));
-  int k = 0;
   Discrim_index_gets++;
-  ix->capacity = capacity;
-  ix->live = 0;
-  ix->filled = 0;
-  ix->key = (int32_t *) get_mem(PTRS(capacity * sizeof(int32_t)));
-  ix->node = (Discrim *) get_mem(PTRS(capacity * sizeof(Discrim)));
-  for (k = 0; k < capacity; k++) {
-    ix->key[k] = DI_EMPTY;
-    ix->node[k] = NULL;
-  }
+  ix->sym = NULL;
+  ix->kid = NULL;
+  ix->nkid = 0;
+  ix->kidcap = 0;
   return ix;
 }
 
@@ -294,30 +301,34 @@ static void di_free(struct discrim_index *ix)
   if (ix == NULL)
     return;
   Discrim_index_frees++;
-  free_mem(ix->key, PTRS(ix->capacity * sizeof(int32_t)));
-  free_mem(ix->node, PTRS(ix->capacity * sizeof(Discrim)));
+  if (ix->kidcap > 0) {
+    free_mem(ix->sym, PTRS(ix->kidcap * sizeof(int32_t)));
+    free_mem(ix->kid, PTRS(ix->kidcap * sizeof(Discrim)));
+  }
   free_mem(ix, PTRS(sizeof(struct discrim_index)));
 }
 
 /* Promote: build the index from the children already on the list.  Only rigid
-   children go in; variables stay a short prefix the caller walks anyway. */
+   children go in; variables stay a short prefix the caller walks anyway.  The
+   list is sorted here and stays sorted, so copying it in list order gives a
+   sorted array -- and that is the invariant, not an accident of this loop. */
 static void di_promote(Discrim parent)
 {
   Discrim k = NULL;
   int n = 0;
-  int cap = 64;
 
   for (k = parent->u.kids; k; k = k->next)
     if (!DVAR(k))
       n++;
-  while (cap < n * 4)
-    cap *= 2;
 
-  parent->child_index = di_new(cap);
+  parent->child_index = di_new();
+  di_reserve(parent->child_index, n);
   for (k = parent->u.kids; k; k = k->next)
     if (!DVAR(k)) {
-      di_put(parent->child_index, k->symbol, k);
-      parent->child_index->tail = k;
+      struct discrim_index *ix = parent->child_index;
+      ix->sym[ix->nkid] = k->symbol;
+      ix->kid[ix->nkid] = k;
+      ix->nkid++;
     }
 }
 
@@ -344,37 +355,71 @@ BOOL discrim_child_indexed(Discrim parent)
 
 /*************
  *
- *   discrim_child_append()
+ *   discrim_child_insert()
  *
  *************/
 
 /* DOCUMENTATION
-Link a rigid child at the end of an INDEXED node's child list, in O(1), and
+Link a rigid child into an INDEXED node's child list IN SYMBOL ORDER, and
 record it in the index.  Only valid when discrim_child_indexed(parent).
+
+THE ORDER IS LOAD BEARING, and finding that out cost a capability regression.
+An earlier version of this function appended at the tail instead, because
+appending is O(1) and splicing into a sorted list is O(fan-out), and argued
+that nothing read the order any more: retrieval looks a symbol up in the index
+rather than walking the siblings.  That argument is wrong about WHICH order
+matters.  Retrieval does not walk the rigid list, but the order of the list is
+the order of the depth-first walk over the tree, and so it is the order in
+which discrim_bind_retrieve_first() hands back equally-matching answers.
+Demodulation and forward subsumption both take the FIRST answer, so reordering
+the children changes which demodulator is applied -- a different normal form,
+a different search.  Measured on Problems/SWV/SWV558-1.010.p: with the
+children sorted, Given=47 Generated=723 Forward_subsumed=201 and the proof is
+found in 0.03 s; with them appended, the same 47 given clauses generate
+1,052,629 clauses, forward subsumption catches 154 instead of 201, and the run
+exhausts 2 GB after 79 s without a proof.  Thirteen corpus problems behaved
+that way.  The index itself was never at fault -- it was instrumented against
+an order-independent scan of the very list it indexes, over millions of
+lookups, with no divergence.
+
+So the order stays, and the cost of keeping it is paid differently: the index
+carries the same children in an ARRAY, in the same order, and the predecessor
+of the new symbol is found by BINARY SEARCH rather than by walking the list.
+The list splice is then O(1), and the array insert is a memmove of pointers --
+contiguous, no dependent loads -- where the walk it replaces was one cache
+miss per sibling.  That keeps both properties that matter: the answer order of
+the 2009 release, and an insert that does not walk the fan-out.
 */
 
 /* PUBLIC */
-void discrim_child_append(Discrim parent, Discrim child)
+void discrim_child_insert(Discrim parent, Discrim child)
 {
   struct discrim_index *ix = parent->child_index;
-  child->next = NULL;
-  if (ix->tail != NULL)
-    ix->tail->next = child;
+  int pos = di_pos(ix, child->symbol);
+  Discrim prev = NULL;
+
+  if (pos > 0)
+    prev = ix->kid[pos-1];        /* the rigid child just below it */
   else {
-    /* No rigid children yet: link after the variable children, which always
-       come first and are never reordered. */
+    /* It sorts before every rigid child, so it goes after the variable
+       children, which always come first and are never reordered.  That prefix
+       is bounded by the number of distinct variables in one indexed term, so
+       walking it is not the fan-out. */
     Discrim k = parent->u.kids;
-    if (k == NULL)
-      parent->u.kids = child;
-    else {
-      while (k->next != NULL)
-	k = k->next;
-      k->next = child;
+    while (k != NULL && DVAR(k)) {
+      prev = k;
+      k = k->next;
     }
   }
-  ix->tail = child;
-  di_put(ix, child->symbol, child);
-}  /* discrim_child_append */
+
+  child->next = (pos < ix->nkid) ? ix->kid[pos] : NULL;
+  if (prev == NULL)
+    parent->u.kids = child;
+  else
+    prev->next = child;
+
+  di_insert_at(ix, pos, child);
+}  /* discrim_child_insert */
 
 /*************
  *
@@ -394,9 +439,9 @@ Discrim discrim_child_find(Discrim parent, Discrim from, int32_t symbol)
 {
   if (parent->child_index != NULL) {
     struct discrim_index *ix = parent->child_index;
-    int h = di_probe(ix, symbol);
-    if (ix->key[h] == symbol)
-      return ix->node[h];
+    int pos = di_pos(ix, symbol);
+    if (pos < ix->nkid && ix->sym[pos] == symbol)
+      return ix->kid[pos];
     /* Absent.  The callers all treat "found a node whose symbol differs" and
        "ran off the end" the same way -- they check `d->symbol != symbol` -- so
        NULL is the honest answer and keeps them on the same path. */
@@ -409,6 +454,60 @@ Discrim discrim_child_find(Discrim parent, Discrim from, int32_t symbol)
     return d;
   }
 }  /* discrim_child_find */
+
+/*************
+ *
+ *   discrim_children_ordered()
+ *
+ *************/
+
+/* DOCUMENTATION
+Check, over a whole discrimination tree, that every node's rigid children are
+in non-decreasing symbol order and that its variable children all precede
+them.  Returns TRUE if so.
+
+This exists because that invariant was broken on purpose once, for speed, on
+the argument that nothing read the order any more -- and the order turned out
+to be the order in which discrim_bind_retrieve_first() returns equally-matching
+answers, which demodulation and forward subsumption both consume.  The cost
+was thirteen corpus problems; see the note above discrim_child_insert().  The
+invariant is cheap to state and was not stated anywhere, so it is stated here
+and asserted by test.src/discrim_test.c.
+
+`n` is the number of tree levels still to descend, as elsewhere in this file:
+1 for the root of a tree of terms.
+*/
+
+/* PUBLIC */
+BOOL discrim_children_ordered(Discrim d, int n)
+{
+  if (d == NULL || n <= 0)
+    return TRUE;
+  else {
+    Discrim k = NULL;
+    int32_t prev_symbol = INT32_MIN;
+    BOOL seen_rigid = FALSE;
+
+    for (k = d->u.kids; k != NULL; k = k->next) {
+      if (DVAR(k)) {
+	if (seen_rigid)
+	  return FALSE;            /* a variable child after a rigid one */
+      }
+      else {
+	if (seen_rigid && k->symbol < prev_symbol)
+	  return FALSE;            /* rigid children out of order */
+	seen_rigid = TRUE;
+	prev_symbol = k->symbol;
+      }
+    }
+    for (k = d->u.kids; k != NULL; k = k->next) {
+      ArityType arity = DVAR(k) ? 0 : sn_to_arity(k->symbol);
+      if (!discrim_children_ordered(k, n + arity - 1))
+	return FALSE;
+    }
+    return TRUE;
+  }
+}  /* discrim_children_ordered */
 
 /*************
  *
@@ -427,7 +526,12 @@ void discrim_child_added(Discrim parent, Discrim child)
   if (parent == NULL || child == NULL || DVAR(child))
     return;
   if (parent->child_index != NULL) {
-    di_put(parent->child_index, child->symbol, child);
+    /* The caller linked it itself, in sorted position; record it there too.
+       (discrim_child_insert() is the path that does both at once.) */
+    struct discrim_index *ix = parent->child_index;
+    int pos = di_pos(ix, child->symbol);
+    if (pos >= ix->nkid || ix->kid[pos] != child)
+      di_insert_at(ix, pos, child);
     return;
   }
   if (parent->nkids < DI_PROMOTE_AT)
@@ -451,25 +555,8 @@ void discrim_child_removed(Discrim parent, Discrim child)
 {
   if (parent == NULL || child == NULL || DVAR(child))
     return;
-  if (parent->child_index != NULL) {
-    struct discrim_index *ix = parent->child_index;
-    int h = di_probe(ix, child->symbol);
-    if (ix->key[h] == child->symbol) {
-      ix->key[h] = DI_TOMB;
-      ix->node[h] = NULL;
-      ix->live--;
-    }
-    if (ix->tail == child) {
-      /* The tail went away; find the new one.  This is O(fan-out), but it
-	 happens only when the LAST rigid child is removed, which is rare
-	 compared with inserting. */
-      Discrim k = parent->u.kids, last = NULL;
-      for (; k; k = k->next)
-	if (!DVAR(k) && k != child)
-	  last = k;
-      ix->tail = last;
-    }
-  }
+  if (parent->child_index != NULL)
+    di_remove(parent->child_index, child);
 }  /* discrim_child_removed */
 
 /*************

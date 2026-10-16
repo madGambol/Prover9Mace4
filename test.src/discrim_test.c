@@ -75,6 +75,7 @@
  */
 
 #include "../ladr/discrimb.h"
+#include "../ladr/discrim.h"
 #include "../ladr/term.h"
 #include "../ladr/symbols.h"
 #include <stdio.h>
@@ -226,6 +227,63 @@ int main(void)
   /* And the field must hold MAX_ARITY, which the AC indexing stores in it. */
   check("the key field can hold MAX_ARITY",
 	(int) MAX_ARITY <= 2147483647 && (int) MAX_ARITY > 32767);
+
+  /* THE CHILD ORDER.  A node's rigid children must stay sorted by symbol, and
+     its variable children must stay in front of them, however many children
+     it has and whatever order they arrive in.
+ 
+     This is the invariant that was not tested, and not testing it cost a
+     capability regression.  The per-node child index (PF10) was built on the
+     argument that nothing read the child order any more, so children could be
+     appended in O(1) instead of spliced into sorted position.  Retrieval
+     really does not walk the rigid list -- it looks the symbol up -- but the
+     LIST order is the order of the depth-first walk over the tree, hence the
+     order in which discrim_bind_retrieve_first() returns equally-matching
+     answers, and demodulation and forward subsumption each take the FIRST
+     answer.  Reordering the children changed which demodulator was applied.
+     On Problems/SWV/SWV558-1.010.p a 0.03 s proof became 2 GB exhausted after
+     79 s of search, and thirteen corpus problems went the same way.  The unit
+     tests above all passed throughout: they check what the index RETURNS for
+     a symbol, which was always right, and never what order the children are
+     in.
+ 
+     The symbols are inserted here in a scrambled order and the count crosses
+     DI_PROMOTE_AT (32) several times over, so the indexed path is the one
+     under test rather than the small-node fallback. */
+  {
+    Discrim root = discrim_init();
+    int n = 400, k = 0;
+    int *syms = malloc(n * sizeof(int));
+    BOOL ordered = FALSE;
+
+    for (k = 0; k < n; k++) {
+      snprintf(name, sizeof(name), "ord%d", k);
+      syms[k] = str_to_sn(name, 1);
+    }
+    /* A fixed scramble: stride 137 over 400 is coprime, so it visits every
+       slot exactly once and lands nowhere near sorted order. */
+    for (k = 0; k < n; k++) {
+      Term t = build(syms[(k * 137) % n], sn_a);
+      discrim_bind_update(t, root, (void *) (long) (k + 1), INSERT);
+      zap_term(t);
+    }
+
+    ordered = discrim_children_ordered(root, 1);
+    check("an indexed node's children stay in symbol order (400 scrambled inserts)",
+	  ordered == TRUE);
+
+    /* And after deletions, which is where the index keeps a separate record
+       that could drift out of step with the list. */
+    for (k = 0; k < n; k += 3) {
+      Term t = build(syms[(k * 137) % n], sn_a);
+      discrim_bind_update(t, root, (void *) (long) (k + 1), DELETE);
+      zap_term(t);
+    }
+    check("...and after deleting every third one",
+	  discrim_children_ordered(root, 1) == TRUE);
+
+    free(syms);
+  }
 
   printf("\n%s (%d failure(s))\n", failures ? "FAILED" : "ALL PASSED", failures);
   return failures != 0;
