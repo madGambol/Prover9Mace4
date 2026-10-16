@@ -131,6 +131,34 @@ never reaches. They were found by a 5,171-problem sweep at a budget long
 enough for the behaviour to appear, and by reading its failures rather than
 counting them.
 
+## The capability question, and what is still unmeasured
+
+Every TPTP figure in this document is **absolute, not differential**: it was
+produced by a fixed build, so it says what this tree can do, not what the work
+added. Against pristine, only three things are established:
+
+- **33 of 41** defect tests fail on pristine `7f94204` and pass here (tier2's
+  `BASELINE=` gate).
+- Startup on `CSR040-10.p` went from **157.53 s to 3.80 s**, a factor of 41.
+- M9–M13's reproductions: pristine crashes or exhausts the OS where this tree
+  exits cleanly with a diagnostic.
+
+The capability A/B — same sample, same budget, pristine against current, with
+the categories broken out — is `prover9-corpus/baseline_ab.sh`, scored with
+`cap_compare.sh`. It interleaves the two builds in one queue rather than
+running one then the other, because CPU time is **not** load-invariant and a
+sequential run would hand them different conditions; see "CPU time is not
+load-invariant" in `FIXES.md`. Both sides run under the same memory cap, which
+is part of the condition and must not be changed mid-run.
+
+Expect it to cut both ways. The PF2–PF10 startup work should convert timeouts
+into answers at a fixed budget. But M9, M10 and M12 make Mace4 **honour**
+`max_megs` where it used to exceed it — the LADR-2026 reproduction showed
+upstream answering a problem at 456 MB against a stated 20 MB ceiling, where
+this tree declines it — so some answers should be lost. A net figure would
+hide that, which is why `cap_compare.sh` reports which problems changed hands
+and why.
+
 ## What is outstanding
 
 Roughly in order of expected value.
@@ -172,14 +200,28 @@ Roughly in order of expected value.
    run went on, so 300 s is near the point of diminishing returns — a further
    10x would add much less.
 
-   **Mace4 at 300 s then found two real defects rather than a capability
-   figure.** At 10 s no run reaches a domain size where it matters; at 300 s
-   many do. 6% of runs were dying in `SIGSEGV` and the sweep drove a cgroup
-   to its ceiling, which turned out to be M9 and M10 — the cell table and the
-   negprop index, both unbounded, unchecked and unaccounted. Those are fixed;
-   the figure itself is still to be collected, now with
-   `oracle_sweep_resume.sh`, which recomputes the remaining work from the
-   output file and halves concurrency when the driver does not survive.
+   **Mace4 at 300 s found two real defects before it produced a figure.** At
+   10 s no run reaches a domain size where it matters; at 300 s many do. 6%
+   of runs were dying in `SIGSEGV` and the sweep drove a cgroup to its
+   ceiling — M9 and M10, the cell table and the negprop index, both
+   unbounded, unchecked and unaccounted. With those fixed the sweep ran to
+   completion: **5,171 of 5,171, 0 SIGSEGV, 0 UNSOUND**, through
+   `oracle_sweep_resume.sh`.
+
+   Mace4 goes from 5.9% to **6.5%**, and the two provers between them from
+   41.4% to **50.4%** of the 5,681 first-order problems with a usable SZS
+   status. All 503 problems whose stated status allows a model were
+   attempted, so that figure is complete at this budget; the remaining 4,668
+   are `Theorem`/`Unsatisfiable`/`ContradictoryAxioms`, where a model cannot
+   exist and the only possible finding is a violation. The 31 models were
+   each re-derived and checked with `interpformat` and `clausetester` —
+   every clause satisfied in every interpretation (`verify_models.sh`).
+
+   Two caveats recorded with the data rather than buried: the results file
+   has a **build boundary at row 3782** because `bin/` was rebuilt mid-sweep
+   (it touches neither headline figure, but the `FATAL`/`MAX_MEGS` split is
+   not uniform across the file), and these are figures for Mace4 *honouring*
+   `max_megs=2000`, which the pristine binary did not.
 5. **The remaining unchecked allocations in `ladr/`.** The important one is
    fixed: M11 charged and checked `get_mem`/`get_cmem`'s large-block path,
    which every caller goes through, and put `Bytes_external` into
