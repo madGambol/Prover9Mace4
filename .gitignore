@@ -17,6 +17,7 @@
 /test.src/tptp_test
 /test.src/strbuf_test
 /test.src/arity_test
+/test.src/intpower_test
 /test.src/varnum_test
 /test.src/bool_test
 /test.src/memory_test
