@@ -2491,7 +2491,7 @@ positive control that exercised a directory the flags had not reached. So
 before the clean result was accepted, `GRP001-1.p` — unsatisfiable, proved in
 about 110 ms — was copied with its header relabelled `Satisfiable`, making that
 proof a contradiction of the stated status. The oracle reported `UNSOUND`, as
-it must. The recipe is in `~/Projects/prover9-corpus/README.md`.
+it must. The recipe is in the corpus repository's `README.md`.
 
 One detail that nearly produced a useless control: the relabelled copy sat
 outside the TPTP tree, so its `include('Axioms/...')` did not resolve and the
@@ -2563,12 +2563,11 @@ this step did, so 300 s is near the point of diminishing returns rather than a
 trend to extrapolate.
 
 **Read the two columns as different experiments.** Mace4's 5.9% is still at
-10 s and is not comparable to Prover9's 47.5%. Raw results are kept in
-`~/Projects/prover9-corpus/results/`, and
-`~/Projects/prover9-corpus/oracle_scoreboard.sh` merges a base sweep with a
-longer-limit re-run — validated by reproducing the 10 s scoreboard exactly
-before being trusted on merged data, the same discipline as calibrating the
-`UNSOUND` detector.
+10 s and is not comparable to Prover9's 47.5%. Raw results are kept in the
+corpus repository's `results/`, and its `oracle_scoreboard.sh` merges a base
+sweep with a longer-limit re-run — validated by reproducing the 10 s
+scoreboard exactly before being trusted on merged data, the same discipline as
+calibrating the `UNSOUND` detector.
 
 ---
 

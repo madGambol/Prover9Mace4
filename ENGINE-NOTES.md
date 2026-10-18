@@ -279,9 +279,11 @@ oracle* possible, which is how the TPTP comparison below is structured.
 
 ### The shared corpus
 
-A local read-only copy of the TPTP library lives at **`~/Projects/TPTP`**,
-deliberately outside any single project so several can share it. See the README
-there for provenance; in summary:
+The TPTP library is in neither this repository nor the corpus repository — it
+is fetched separately from <https://www.tptp.org> — and the scripts in both
+take its location from **`TPTP_DIR`**, which names the distribution root. Keep
+the copy read-only and outside any single project so several can share it. The
+provenance of the copy these numbers were measured against:
 
 - **TPTP v9.3.1**, distribution dated 21 August 2026, 10 GB unpacked.
 - `sha256 8e9462d9443a2250000224cf4f7002a64ea02cbe07fa5cdcdecfd0fe8cd81f03`
@@ -349,7 +351,7 @@ Partitioned by what each tool can be asked to do:
 everything with that as the working directory:
 
 ```sh
-cd ~/Projects/TPTP/TPTP-v9.3.1
+cd "$TPTP_DIR"
 tptp_to_ladr < Problems/PUZ/PUZ001+1.p > /tmp/p.in
 prover9 -f /tmp/p.in
 ```

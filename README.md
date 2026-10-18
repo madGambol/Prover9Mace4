@@ -249,11 +249,14 @@ is Commonsense Reasoning — 32 of 548 — which is also the domain whose proble
 come from large hand-built ontologies, 324 of them from a single one.
 
 The harness and every scored sweep are published separately, as
-**Prover9Corpus**, because they are bulky and have a different licence
-footprint. It is **not published publicly** — it lives on a private mirror —
-so open an issue if you need it. Its scripts expect to find this tree beside
-them, in a directory named `prover9-corpus`; they default to
-`../Prover9Mace4/bin`, and `BIN_DIR` and `TPTP_DIR` override that.
+**[ProverCorpus](https://github.com/madGambol/ProverCorpus)**, because they
+are bulky and have a different licence footprint. Its scripts expect to find
+this tree beside them, so clone it under the name the examples use:
+
+```sh
+git clone https://github.com/madGambol/ProverCorpus.git prover9-corpus
+# the scripts default to ../Prover9Mace4/bin; BIN_DIR and TPTP_DIR override
+```
 
 The TPTP library itself is in neither repository — `results/` holds problem
 *paths*, not problems — so reproducing any TPTP figure needs v9.3.1 from

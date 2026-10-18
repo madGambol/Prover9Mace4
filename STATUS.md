@@ -310,7 +310,7 @@ Roughly in order of expected value.
    mislabelled problem first so that a clean result means something. Capability
    alongside it: prover9 38.5% and mace4 5.9% of the 5,681 first-order problems
    with a usable status, 41.4% between them. Detail in `FIXES.md`, recipe in
-   `~/Projects/prover9-corpus/README.md`.
+   the corpus repository's `README.md`.
 
    A follow-up re-ran Prover9's 3,361 timed-out runs at 300 s — only those,
    since an answered problem cannot change its answer by being given more
@@ -320,7 +320,7 @@ Roughly in order of expected value.
    to find, so ~5 h of machine time for almost no information), which means its
    5.9% is still a 10 s figure and is **not comparable** to Prover9's.
 
-   Raw results in `~/Projects/prover9-corpus/results/`; merge and score with
+   Raw results in the corpus repository's `results/`; merge and score with
    `oracle_scoreboard.sh`. The conversion rate decayed 21.4% → 15.1% as the
    run went on, so 300 s is near the point of diminishing returns — a further
    10x would add much less.
@@ -401,8 +401,11 @@ Roughly in order of expected value.
 11. **Publication** — done, with one piece deliberately dropped. The canonical
    home of this tree is <https://github.com/madGambol/Prover9Mace4>, with a
    private mirror kept in step; `master` and `rc` are aligned on both. The
-   corpus is on the private mirror only, so it is unreachable to anyone
-   arriving from GitHub — publishing it is the one loose end here.
+   corpus is published too, as <https://github.com/madGambol/ProverCorpus>,
+   so every gate in this document is reachable from a clone: a fresh clone of
+   both repositories builds, and runs tier1, tier2 with a baseline worktree,
+   audit and tier3, with no path or hostname from the author's machine in
+   any of it.
    GPL-2 §2(a) per-file change notices are in place — 91 files, see
    `LICENSING.md` for the convention and for what was deliberately left alone.
    Upstreaming to `AlgorithmicTruth/Prover9` was **dropped**: without a total

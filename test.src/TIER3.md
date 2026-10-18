@@ -16,10 +16,17 @@ case in detail; this file is only about running them.
 
 ## What you need
 
-- **A corpus**: a list of input files, one path per line. The published one is
-  `files.txt` in the corpus repository, 168 paths. Clone that beside this tree
-  and nothing else is required — in particular **tier3 does not need the TPTP
-  library**, because every path in `files.txt` points inside the corpus repo.
+- **A corpus**: a list of input files, one path per line. The published one
+  is `files.txt`, 168 paths, in
+  [ProverCorpus](https://github.com/madGambol/ProverCorpus):
+
+  ```sh
+  git clone https://github.com/madGambol/ProverCorpus.git prover9-corpus
+  ```
+
+  Clone it beside this tree and nothing else is required — in particular
+  **tier3 does not need the TPTP library**, because every path in `files.txt`
+  points inside that repository.
 - **A compiler with AddressSanitizer and UBSan**. GCC 15.2 was used here.
   `sanitizer_sweep.sh` verifies that the build really is instrumented, two
   ways, and stops if it is not — a sanitizer sweep that silently ran an
