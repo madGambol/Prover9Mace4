@@ -1,11 +1,61 @@
 # Prover9 and Mace4 — LADR-2009-11A, repaired for modern toolchains
 
-**Here for the results?** **`RESULTS.md`** is the measured summary: what this
-work changed, what it cost, and the gains and losses set out side by side. The
-short version is that 99 wrong answers across 17,992 TPTP runs become 0, startup
-on a 44,227-clause problem goes from 162.8 s to 3.2 s, and this tree answers
-about 4% fewer problems at a fixed 10-second budget — because fixing a
-translation defect turns an easy wrong problem into the hard right one.
+## Why this tree
+
+LADR-2009-11A does not compile on a current compiler — not with warnings, at
+all. This tree makes it build, and then fixes what the compiler had been
+hiding. Across **17,992 TPTP runs** the 2009 code returns **99 wrong answers
+and 103 segfaults; this tree returns none of either**. On knowledge-base-scale
+input it starts **51x faster** — a 44,227-clause problem goes from 162.8 s to
+3.2 s — and because the fixes removed costs that scaled with the *vocabulary*
+rather than with the work being done, the gap widens as the knowledge base
+grows.
+
+None of it has to be taken on trust. The first commit is the untouched 2009
+tarball, so `git diff 25b4505` is the entire change; each of the **58 defects**
+in `FIXES.md` has a reproducer and a measurement; and the regression suite is
+required to **fail** against the original build — **33 of its 41 tests do** —
+so a green run cannot be an artefact of a stale binary.
+
+Two costs belong in the same breath as the gains:
+
+- **It answers about 4% fewer problems** at a fixed 10-second budget. Fixing a
+  translation defect turns an easy wrong problem into the hard right one, and
+  `RESULTS.md` accounts for the difference problem by problem.
+- **At least one quadratic remains.** The scaling ladder's constant improved
+  24–28x; its exponent did not move. That is item 3 in `STATUS.md`.
+
+### One new build dependency: libstdc++
+
+Two translation units inside `libladr` are C++ — `ladr/i2accum_cxx.cpp` and
+`ladr/symtab_cxx.cpp` — so the build needs **g++ with `-std=c++17`**, and every
+program that links `libladr.a` also links **`-lstdc++`**. The 2009 release
+needed only libc and libm. There is no pure-C configuration: the hand-written
+containers these replaced were deleted rather than kept behind a switch.
+
+The reason is bug surface, not speed. The performance work produced four
+hand-rolled containers — open-addressed hash tables with probing, tombstones,
+load factors and rehash, 80–150 lines apiece — and one of them introduced a
+**fresh quadratic** that only measurement caught. Two were replaced by
+`std::unordered_map` and `std::vector` behind exactly the C interfaces they
+already had: no caller changed, and about 230 lines of container code went
+away. Measured end to end the swap is **1.04x** — not a win, and not claimed
+as one.
+
+Three details keep it safe, each documented at the top of
+`ladr/i2accum_cxx.cpp`: allocations go through `LadrAlloc`, so they still count
+against `max_megs`; first-seen iteration order is preserved explicitly, because
+symbol precedence is derived from these lists and a different order would
+silently change every proof; and every `extern "C"` entry point catches
+everything, since an exception crossing into C is undefined behaviour. The
+licence consequence — libstdc++ is GPL-3, and GCC's Runtime Library Exception
+is what makes it legitimate inside a GPL-2-only program — is in `LICENSING.md`.
+
+## Where to look
+
+**Here for the results?** **`RESULTS.md`** is the measured summary behind the
+numbers above: what changed, what it cost, and the gains and losses set out
+side by side, accounted for problem by problem.
 
 **Working on it?** `STATUS.md` has the current state, how to gate a change, and
 what is outstanding. `FIXES.md` is the defect catalogue, 58 of them, each with a
@@ -20,10 +70,10 @@ paramodulation theorem prover for first-order and equational logic) and Mace4
 (a finite-model searcher for the same input language), with the changes needed
 to make it build and run correctly on a current compiler.
 
-LADR-2009-11A was McCune's last release, and on a modern toolchain it does not
-compile at all. Once it does compile it carries several defects reachable from
-ordinary input — including four stack buffer overflows, an uncontrolled format
-string, and undefined behaviour on every default Prover9 run.
+LADR-2009-11A was McCune's last release. Past the build failures it carries
+several defects reachable from ordinary input — including four stack buffer
+overflows, an uncontrolled format string, and undefined behaviour on every
+default Prover9 run.
 
 **If you just want a current Prover9, use [LADR-2026](https://prover9.org)**
 (source at [AlgorithmicTruth/Prover9](https://github.com/AlgorithmicTruth/Prover9)),
@@ -53,7 +103,8 @@ make test3               # the remaining programs
 ```
 
 Verified with GCC 15.2 (Ubuntu), whose default `-std=gnu23` is what rejects
-the original source. No configure step, no dependencies beyond libc and libm.
+the original source. No configure step; the dependencies are libc, libm and
+libstdc++, for the reason given under "One new build dependency" above.
 
 ```sh
 make -C test.src check
