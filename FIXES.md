@@ -3373,7 +3373,7 @@ the same terms as the rest: what broke, how it was found, what the measurement
 said, and what the fix is.
 
 ### R1 — the discrimination child index reordered the children, and twelve problems stopped being proved
-`ladr/discrim.c`, `ladr/discrim.h`, introduced by `1015dee` (PF10)
+`ladr/discrim.c`, `ladr/discrim.h`, introduced by `91866df` (PF10)
 
 **How it surfaced.** Not by a test. The first capability A/B against the
 pristine 2009 release — 8,996 TPTP problems, both provers, 10 s CPU, both
@@ -3424,9 +3424,9 @@ reps each:
 A 0.03 s proof becoming 2 GB of memory exhausted after 79 s is a different
 error mode, not a slower one.
 
-**What `git bisect` said.** Over the 105 commits from `3d140a6` to `0ba59c9`,
+**What `git bisect` said.** Over the 105 commits from `3d140a6` to `d20e592`,
 with "proves SWV558-1.010 inside 20 s and 500 MB" as the test: first bad commit
-`1015dee`, *"Give discrimination-tree nodes a symbol-keyed child index
+`91866df`, *"Give discrimination-tree nodes a symbol-keyed child index
 (1.93x)"*. That commit's own message ends:
 
 > The 174-run corpus A/B is NOT yet run for this change and is required before

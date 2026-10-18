@@ -138,7 +138,7 @@ section below this one is the design and still applies; what follows is the
 result.
 
 First run: 8,996 problems, both provers, 10 s CPU, 4 GB per run, pristine
-`3d140a6` against `1cd3221`, both builds interleaved in one shuffled queue.
+`3d140a6` against `b112b9f`, both builds interleaved in one shuffled queue.
 17,992 rows per build, every key paired.
 
 | category | pristine | current | delta |
@@ -184,7 +184,7 @@ one, and losing it is the fix working. Separating the causes needs a
 | **current translation** | 18 | 6 |
 
 Per problem: **187 of the 205 losses are the corrected input defeating both
-provers, 12 are the prover, 6 were noise.** The 12 bisected to `1015dee` and
+provers, 12 are the prover, 6 were noise.** The 12 bisected to `91866df` and
 are written up as **R1** in `FIXES.md` — the child order of the discrimination
 index, fixed on `feature/discrim-child-order`. Quoting the 134 would have been
 wrong twice over: it overstates the regression tenfold and buries a real one.
