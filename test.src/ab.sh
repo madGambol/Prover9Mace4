@@ -77,7 +77,23 @@ mode=${1:-ab}
 A=${A:-../bin}
 B=${B:-}
 CORPUS=${CORPUS:-$HOME/Projects/prover9-corpus/comparable.txt}
-JOBS=${JOBS:-12}
+
+# Default concurrency is derived, not fixed: one run per core, and no more
+# than memory allows at the per-run ceiling.  A fixed number is wrong on every
+# machine except the one it was tuned on -- 32 concurrent runs on a four-core
+# laptop is eightfold oversubscription, and at this ceiling each it is an OOM
+# kill partway through a sweep rather than a slow sweep.  It scales up as well
+# as down, and an explicit argument or JOBS= still wins over both.
+_cores=$( (nproc || getconf _NPROCESSORS_ONLN) 2>/dev/null || echo 1 )
+_job_mb=800
+_avail_mb=$(awk '/^MemAvailable:/ {print int($2 / 1024)}' /proc/meminfo 2>/dev/null)
+if [ -n "${_avail_mb:-}" ] && [ "${_avail_mb:-0}" -gt 0 ] && [ "$_job_mb" -gt 0 ]; then
+  _mem_jobs=$(( _avail_mb / _job_mb ))
+  [ "$_mem_jobs" -lt 1 ] && _mem_jobs=1
+  [ "$_mem_jobs" -lt "$_cores" ] && _cores=$_mem_jobs
+fi
+[ "$_cores" -lt 1 ] && _cores=1
+JOBS=${JOBS:-$_cores}
 CPU=${CPU:-600}
 NORM=$(cd "$(dirname "$0")" && pwd)/normalize_output.sh
 

@@ -268,7 +268,7 @@ ab:
 
 cap:
 	@if [ -z "$(BASELINE)" ]; then 	  echo "make cap needs BASELINE=<pristine bin dir> to compare ../bin against"; 	  exit 2; 	fi
-	@g=$${CAP_GATE:-$$HOME/Projects/prover9-corpus/cap_gate.sh}; 	if [ -x "$$g" ]; then 	  "$$g" "$(BASELINE)" "$$(cd .. && pwd)/bin" $${CAP_SECS:-10} $${CAP_JOBS:-32}; 	else 	  echo "cap: SKIP (no $$g -- needs the prover9-corpus repo and the TPTP library)"; 	fi
+	@g=$${CAP_GATE:-$$HOME/Projects/prover9-corpus/cap_gate.sh}; 	if [ -x "$$g" ]; then 	  "$$g" "$(BASELINE)" "$$(cd .. && pwd)/bin" $${CAP_SECS:-10} $${CAP_JOBS:-}; 	else 	  echo "cap: SKIP (no $$g -- needs the prover9-corpus repo and the TPTP library)"; 	fi
 
 # Promote rc to master, refusing unless master's tree will be identical to the
 # tree the gates ran against.  See the comments in promote.sh: tree identity

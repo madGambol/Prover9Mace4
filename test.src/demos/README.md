@@ -31,7 +31,7 @@ To build the original for comparison — upstream does not compile on a modern
 toolchain, so this is upstream plus only the three build fixes:
 
 ```sh
-git worktree add /tmp/ladr-baseline 7f94204
+git worktree add /tmp/ladr-baseline 3d140a6
 make -C /tmp/ladr-baseline all
 ./test.src/demos/run.sh /tmp/ladr-baseline/bin
 ```

@@ -59,10 +59,10 @@ target now and `tier1` runs it first. Note the Makefiles are **not**
 parallel-safe: `make -j` races in `install` and leaves a *file* named `bin`
 where the directory belongs, after which every later build fails.
 
-The pristine-plus-build-fixes baseline for `BASELINE=` is commit `7f94204`:
+The pristine-plus-build-fixes baseline for `BASELINE=` is commit `3d140a6`:
 
 ```sh
-git worktree add --detach /tmp/base 7f94204 && (cd /tmp/base && make all)
+git worktree add --detach /tmp/base 3d140a6 && (cd /tmp/base && make all)
 ```
 
 **Why master can skip the suite, and when it cannot.** The licence is not
@@ -138,7 +138,7 @@ section below this one is the design and still applies; what follows is the
 result.
 
 First run: 8,996 problems, both provers, 10 s CPU, 4 GB per run, pristine
-`7f94204` against `ce7d848`, both builds interleaved in one shuffled queue.
+`3d140a6` against `1cd3221`, both builds interleaved in one shuffled queue.
 17,992 rows per build, every key paired.
 
 | category | pristine | current | delta |
@@ -184,7 +184,7 @@ one, and losing it is the fix working. Separating the causes needs a
 | **current translation** | 18 | 6 |
 
 Per problem: **187 of the 205 losses are the corrected input defeating both
-provers, 12 are the prover, 6 were noise.** The 12 bisected to `a88f027` and
+provers, 12 are the prover, 6 were noise.** The 12 bisected to `1015dee` and
 are written up as **R1** in `FIXES.md` — the child order of the discrimination
 index, fixed on `feature/discrim-child-order`. Quoting the 134 would have been
 wrong twice over: it overstates the regression tenfold and buries a real one.
@@ -232,7 +232,7 @@ was produced by a fixed build, so it says what this tree can do, not what the
 work added. Before the A/B above, only three things were established against
 pristine:
 
-- **33 of 41** defect tests fail on pristine `7f94204` and pass here (tier2's
+- **33 of 41** defect tests fail on pristine `3d140a6` and pass here (tier2's
   `BASELINE=` gate).
 - Startup on `CSR040-10.p` went from **157.53 s to 3.80 s**, a factor of 41.
 - M9–M13's reproductions: pristine crashes or exhausts the OS where this tree

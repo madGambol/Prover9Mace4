@@ -2044,7 +2044,7 @@ instrument first checked on a one-clause input (9 ms and 8 ms):
 
 | build | run 1 | run 2 | run 3 | median |
 | --- | ---: | ---: | ---: | ---: |
-| pristine `7f94204` | 153.9 s | 173.9 s | 162.8 s | **162.8 s** |
+| pristine `3d140a6` | 153.9 s | 173.9 s | 162.8 s | **162.8 s** |
 | this tree, after R1 | 3.17 s | 3.15 s | 3.30 s | **3.17 s** |
 
 **51x**, against 41x before — the sorted array is slightly faster than the hash
@@ -2812,7 +2812,7 @@ script, run against three builds:
 
 | build | result |
 | --- | --- |
-| pristine `7f94204` | **3 failures** — both cell-table cases and the negprop case |
+| pristine `3d140a6` | **3 failures** — both cell-table cases and the negprop case |
 | M9 only | **1 failure** — the negprop case, precisely |
 | M9 + M10 | all pass |
 
@@ -3373,7 +3373,7 @@ the same terms as the rest: what broke, how it was found, what the measurement
 said, and what the fix is.
 
 ### R1 — the discrimination child index reordered the children, and twelve problems stopped being proved
-`ladr/discrim.c`, `ladr/discrim.h`, introduced by `a88f027` (PF10)
+`ladr/discrim.c`, `ladr/discrim.h`, introduced by `1015dee` (PF10)
 
 **How it surfaced.** Not by a test. The first capability A/B against the
 pristine 2009 release — 8,996 TPTP problems, both provers, 10 s CPU, both
@@ -3424,9 +3424,9 @@ reps each:
 A 0.03 s proof becoming 2 GB of memory exhausted after 79 s is a different
 error mode, not a slower one.
 
-**What `git bisect` said.** Over the 106 commits from `7f94204` to `858075d`,
+**What `git bisect` said.** Over the 105 commits from `3d140a6` to `0ba59c9`,
 with "proves SWV558-1.010 inside 20 s and 500 MB" as the test: first bad commit
-`a88f027`, *"Give discrimination-tree nodes a symbol-keyed child index
+`1015dee`, *"Give discrimination-tree nodes a symbol-keyed child index
 (1.93x)"*. That commit's own message ends:
 
 > The 174-run corpus A/B is NOT yet run for this change and is required before
