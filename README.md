@@ -243,7 +243,7 @@ The shape matters more than the totals: 71% of Prover9's successes arrive
 within one second, and the solve rate falls from 83.8% on problems TPTP rates
 easiest to 1.5% on those it rates hardest. The weakest domain by a wide margin
 is Commonsense Reasoning — 32 of 548 — which is also the domain whose problems
-come from large hand-built ontologies, 324 of them Cyc-derived.
+come from large hand-built ontologies, 324 of them from a single one.
 
 The harness and every scored sweep are published separately, as
 **Prover9Corpus**, because they are bulky and have a different licence

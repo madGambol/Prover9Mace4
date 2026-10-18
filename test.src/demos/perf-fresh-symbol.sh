@@ -38,7 +38,7 @@
 #   files have thousands: Axioms/BIO001+0.ax has 25,062 and
 #   Axioms/CSR003+2.ax has 14,265.  Translating the larger Commonsense
 #   Reasoning problems spent nearly all of its time here, and the largest
-#   never finished.  This is the shape of problem a Cyc-sized knowledge base
+#   never finished.  This is the shape of problem an ontology-sized KB
 #   hits constantly: an operation that is fine at 100 symbols and fatal at
 #   10,000.
 #

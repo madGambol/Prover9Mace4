@@ -34,7 +34,7 @@
  *       else                    a->next = multiset_add_n(a->next, i, n);
  *
  *   so building a multiset of N distinct symbols cost O(N^2) comparisons and
- *   N stack frames.  At 250,000 distinct symbols -- a Cyc-sized knowledge base,
+ *   N stack frames.  At 250,000 distinct symbols -- an ontology-sized KB,
  *   not a hypothetical -- the recursion overflowed the 8 MB default stack and
  *   the process died with no diagnostic.  Raising the stack to 1 GB did not
  *   help: it stopped crashing and ran past a 300-second CPU limit instead.
