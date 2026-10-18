@@ -91,11 +91,23 @@ mem_cap=$(( mem_mb / 1500 ))
 [ "$mem_cap" -lt 1 ] && mem_cap=1
 cores=$(nproc)
 if [ "$mem_cap" -lt "$cores" ]; then default_jobs="$mem_cap"; else default_jobs="$cores"; fi
-jobs="${3:-$default_jobs}"
+jobs="${3:-${JOBS:-$default_jobs}}"
 [ "$jobs" -lt 1 ] && jobs=1
 
 [ -n "$corpus" ] && [ -r "$corpus" ] || {
   echo "usage: $0 CORPUS_LIST [BUILD_DIR] [JOBS]" >&2; exit 2; }
+
+# A path in the list may be relative, and is then resolved against the LIST
+# FILE's own directory rather than the caller's cwd, so that a corpus can be
+# cloned anywhere and its lists still work.  Absolute paths are left alone;
+# blank lines and # comments are dropped.
+_corpus_dir=$(cd "$(dirname "$corpus")" && pwd)
+_corpus_resolved=$(mktemp "${TMPDIR:-/tmp}/ladr-corpus.XXXXXX")
+trap 'rm -f "$_corpus_resolved"' 0 1 2 3 15
+awk -v d="$_corpus_dir" '
+  /^[[:space:]]*(#|$)/ { next }
+  { if ($0 ~ /^\//) print $0; else print d "/" $0 }' "$corpus" > "$_corpus_resolved"
+corpus="$_corpus_resolved"
 
 echo "=== building an instrumented tree in $build ==="
 rm -rf "$build"

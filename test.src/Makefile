@@ -297,14 +297,19 @@ promote:
 	fi
 	./promote.sh "$(GATED)"
 
+# JOBS=n caps concurrency for every sweep below.  Without it each one takes
+# min(nproc, what memory allows at its own per-run ceiling), which is right on
+# the machine it is run on but worth overriding on a shared or small one.
+# tier1 and tier2 do not parallelise at all, so JOBS does not apply to them.
 tier3:
 	@if [ -z "$(CORPUS)" ]; then \
 	  echo "tier3 needs a corpus:  make tier3 CORPUS=/path/to/list-of-inputs"; \
+	  echo "                       make tier3 CORPUS=... JOBS=2   # fewer cores"; \
 	  exit 2; \
 	fi
-	./sanitizer_sweep.sh "$(CORPUS)"
-	./poison_sweep.sh "$(CORPUS)"
-	./valgrind_sweep.sh "$(CORPUS)"
+	JOBS="$(JOBS)" ./sanitizer_sweep.sh "$(CORPUS)"
+	JOBS="$(JOBS)" ./poison_sweep.sh "$(CORPUS)"
+	JOBS="$(JOBS)" ./valgrind_sweep.sh "$(CORPUS)"
 
 demos:
 	./demos/run.sh

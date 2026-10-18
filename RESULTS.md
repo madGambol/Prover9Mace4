@@ -2,7 +2,7 @@
 
 This is a reference fork of McCune's **LADR-2009-11A** (Prover9 and Mace4).
 Commit `25b4505` is the pristine upstream tarball, unmodified, so
-`git diff 25b4505` shows every change ever made here. `3d140a6` adds only the
+`git diff 25b4505` shows every change ever made here. `04567a4` adds only the
 build fixes needed to compile it on a current toolchain, and is the baseline
 every comparison below is measured against.
 
@@ -21,7 +21,7 @@ Three documents sit beside this one:
 
 ## 1. Summary
 
-| | pristine `3d140a6` | this tree |
+| | pristine `04567a4` | this tree |
 | --- | ---: | ---: |
 | **Wrong answers on 17,992 TPTP runs** | **99** | **0** |
 | Crashes (SIGSEGV) on the same runs | 103 | 0 |
@@ -61,7 +61,7 @@ make -C test.src cap   BASELINE=<pristine bin>   # the capability gate
 **The discrimination check matters more than the pass.** A test that passes on
 the unfixed code proves nothing, so `tier2 BASELINE=` re-runs the regression
 suite against the pristine build and requires that it **fail**: **33 of the 41
-fail against `3d140a6`** and pass here. The other 8 cover defects reachable
+fail against `04567a4`** and pass here. The other 8 cover defects reachable
 only under a sanitizer build or only on inputs the pristine build rejects
 before reaching the defect.
 
@@ -84,7 +84,7 @@ measured on an idle machine, the two builds interleaved:
 
 | build | run 1 | run 2 | run 3 | median |
 | --- | ---: | ---: | ---: | ---: |
-| pristine `3d140a6` | 153.9 s | 173.9 s | 162.8 s | **162.8 s** |
+| pristine `04567a4` | 153.9 s | 173.9 s | 162.8 s | **162.8 s** |
 | this tree | 3.17 s | 3.15 s | 3.30 s | **3.17 s** |
 
 **51x.** The instrument was checked first on a one-clause input, which measures
@@ -156,7 +156,7 @@ would use typed arithmetic or higher-order reasoning.
 ## 5. TPTP capability, differential — the gains and the losses
 
 Same 8,996 problems, both programs, **10 s CPU**, 4 GB per run, pristine
-`3d140a6` against this tree, with **both builds interleaved in one shuffled
+`04567a4` against this tree, with **both builds interleaved in one shuffled
 queue**. 17,992 runs per build; every key paired. Interleaving is not
 fussiness: the same binary on the same input measured 20.48, 18.95, 10.87 and
 10.14 CPU seconds across four runs as machine load varied, so running one build
@@ -360,7 +360,7 @@ still at 100 — which 17 of 40 sampled FATAL problems hit.
 git clone https://github.com/madGambol/Prover9Mace4.git
 cd Prover9Mace4
 make all                                  # builds to ./bin
-git worktree add --detach /tmp/base 3d140a6 && (cd /tmp/base && make all)
+git worktree add --detach /tmp/base 04567a4 && (cd /tmp/base && make all)
 make -C test.src tier2 BASELINE=/tmp/base/bin
 ```
 

@@ -110,6 +110,16 @@ if [ ! -r "$CORPUS" ]; then
   exit 2
 fi
 
+# A path in the list may be relative, and is then resolved against the LIST
+# FILE's own directory rather than the caller's cwd, so that a corpus can be
+# cloned anywhere and its lists still work.  The lines are prog|path.
+_corpus_dir=$(cd "$(dirname "$CORPUS")" && pwd)
+_corpus_resolved=$(mktemp "${TMPDIR:-/tmp}/ladr-pairs.XXXXXX")
+awk -v d="$_corpus_dir" -F'|' '
+  /^[[:space:]]*(#|$)/ { next }
+  { p = $2; if (p !~ /^\//) p = d "/" p; print $1 "|" p }' "$CORPUS" > "$_corpus_resolved"
+CORPUS="$_corpus_resolved"
+
 # A run that stopped on a clock is not comparable.  max_megs is not a clock.
 clock_limited() {
   printf '%s' "$1" | grep -qE 'exit \((max_seconds|max_sec_no|max_sec_yes|max_domain_seconds)\)'
@@ -136,7 +146,7 @@ one_pair() {
 export -f one_pair
 
 out=$(mktemp) || exit 2
-trap 'rm -f "$out"' 0 1 2 3 15
+trap 'rm -f "$out" "$_corpus_resolved"' 0 1 2 3 15
 
 xargs -a "$CORPUS" -d'\n' -P "$JOBS" -I{} \
   bash -c 'one_pair "$1" "$2" "$3" "$4" "$5" "$6"' _ "{}" "$mode" "$A" "$B" "$NORM" "$CPU" > "$out" 2>&1
