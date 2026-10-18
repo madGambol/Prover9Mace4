@@ -223,6 +223,20 @@ tier2: strbuf_test memory_test discrim_test tier1
 	cd .. && $(MAKE) test1 && $(MAKE) test2 && $(MAKE) test3
 	@if [ -n "$(BASELINE)" ]; then \
 	  echo "--- checking the defect tests still fail against $(BASELINE) ---"; \
+	  if [ ! -d "$(BASELINE)" ]; then \
+	    echo "    NOT A DIRECTORY: $(BASELINE)"; \
+	    echo "    A baseline build whose bin/ did not exist leaves a single"; \
+	    echo "    binary named bin instead.  See STATUS.md, 'the baseline'."; \
+	    exit 2; \
+	  fi; \
+	  for p in prover9 mace4 tptp_to_ladr prooftrans directproof ladr_to_tptp; do \
+	    if [ ! -x "$(BASELINE)/$$p" ]; then \
+	      echo "    INCOMPLETE: $(BASELINE) has no $$p"; \
+	      echo "    Tests then fail for want of a binary, not for want of a"; \
+	      echo "    fix, and this check would report MORE failures than exist."; \
+	      exit 2; \
+	    fi; \
+	  done; \
 	  ./regress.sh "$(BASELINE)" > /tmp/ladr-baseline-run.txt 2>&1; \
 	  n=$$(grep -c '  FAIL  ' /tmp/ladr-baseline-run.txt); \
 	  echo "    $$n of 41 fail against the baseline"; \

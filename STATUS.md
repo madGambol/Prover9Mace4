@@ -65,6 +65,24 @@ The pristine-plus-build-fixes baseline for `BASELINE=` is commit `3d140a6`:
 git worktree add --detach /tmp/base 3d140a6 && (cd /tmp/base && make all)
 ```
 
+That works unmodified because **every commit from the build fixes onward
+carries an empty `bin/.gitkeep`**, and it is worth knowing what happens
+without it, because this cost a run of the gate more than once. At a commit
+with no `bin/`, the first subdirectory's install step is `cp -p <one binary>
+../bin`, which with a single source and no such directory writes a 430 KB
+*file* named `bin`. The next directory copies seven binaries into it and dies
+on `cp: target '../bin': Not a directory`. A baseline left in that state used
+to be accepted: `tier2 BASELINE=` ran against it and reported **36 of 41**
+defect tests failing rather than the true 33, because three tests failed for
+want of a binary rather than for want of a fix — a gate reporting a better
+number than it had earned. `tier2` now refuses a baseline that is not a
+directory or that lacks any binary the suite invokes.
+
+The pristine commit `25b4505` is the exception and has no placeholder: it is
+the unmodified tarball, and the 91 per-file change notices all cite
+`git diff 25b4505`, so nothing may be added to it. It does not compile on a
+current toolchain anyway, which is what the build fixes are for.
+
 **Why master can skip the suite, and when it cannot.** The licence is not
 that the merge fast-forwarded — it is that master's tree is byte-identical to
 the tree that passed. Those differ: a `--no-ff` merge with nothing else on
