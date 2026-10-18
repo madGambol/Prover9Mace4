@@ -115,6 +115,9 @@ libstdc++, for the reason given under "One new build dependency" above.
 make -C test.src check
 ```
 
+The memory-safety sweeps are a separate gate with its own prerequisites and
+its own guide: [`test.src/TIER3.md`](test.src/TIER3.md).
+
 runs the test suite added here: 35 regression tests, a `String_buf` unit test,
 and a Mace4 soundness check that independently re-verifies 271 reported models
 against their input clauses using `interpformat` and `clausetester`.

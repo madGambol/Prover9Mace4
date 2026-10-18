@@ -311,6 +311,9 @@ tier3:
 	  echo "core(s); each sweep also caps it by free memory and says when it"; \
 	  echo "does, so a number larger than the machine can take is lowered"; \
 	  echo "rather than honoured.  JOBS=2 works, and is slower."; \
+	  echo ""; \
+	  echo "test.src/TIER3.md has the whole procedure: what each sweep"; \
+	  echo "catches, what it needs installed, and how to read its output."; \
 	  exit 2; \
 	fi
 	JOBS="$(JOBS)" ./sanitizer_sweep.sh "$(CORPUS)"

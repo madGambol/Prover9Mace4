@@ -47,7 +47,7 @@ checkable.
 ```
 make -C test.src tier1     # unit tests and demonstrations, about a minute
 make -C test.src tier2 BASELINE=<pristine bin>   # the full regression suite
-make -C test.src tier3 CORPUS=<list> JOBS=<n>    # sanitizers, poison, valgrind
+make -C test.src tier3 CORPUS=<list> JOBS=<n>    # see test.src/TIER3.md
 make -C test.src cap   BASELINE=<pristine bin>   # the capability gate
 ```
 

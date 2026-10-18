@@ -46,6 +46,7 @@ cd test.src
 make tier1                                                  # ~2 s
 make tier2 BASELINE=/path/to/pristine-plus-build-fixes/bin   # ~3 min
 make tier3 CORPUS=../../prover9-corpus/files.txt JOBS=8     # ~15 min at 8
+#   ... see test.src/TIER3.md for what tier3 needs and how to read it
 make ab   BASELINE=/path/to/previous/bin                     # ~20 min
 ```
 

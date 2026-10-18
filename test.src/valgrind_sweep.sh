@@ -95,6 +95,13 @@ fi
 [ -n "$corpus" ] && [ -r "$corpus" ] || {
   echo "usage: $0 CORPUS_LIST [SAMPLE_SIZE] [BUILD_DIR] [JOBS]" >&2; exit 2; }
 
+command -v valgrind >/dev/null 2>&1 || {
+  echo "$0: valgrind is not on PATH." >&2
+  echo "  Debian/Ubuntu: sudo apt install valgrind" >&2
+  echo "  The other two sweeps need no external tool and can run without it;" >&2
+  echo "  see test.src/TIER3.md." >&2
+  exit 2; }
+
 # A path in the list may be relative, and is then resolved against the LIST
 # FILE's own directory rather than the caller's cwd, so that a corpus can be
 # cloned anywhere and its lists still work.  Absolute paths are left alone;
