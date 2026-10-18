@@ -2706,7 +2706,7 @@ that a table which *does* fit is still searched and still yields its model.
 It fails against the pristine baseline with `exit 102 is SIGSEGV -- the
 unguarded allocation is back`, which is what makes it a regression test.
 
-**What this says for a large-KB engine.** The table is sized by `d^arity` over the
+**What this says for a KB engine.** The table is sized by `d^arity` over the
 *symbol table*, and the arities that hurt were not in the problem — they were
 manufactured by clausification. An engine that allocates per-symbol structures
 sized by a property of the symbol will be handed symbols no human wrote, with

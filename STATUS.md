@@ -223,8 +223,7 @@ is a lost problem, never a wrong answer. Measured anyway: the largest of the
 problems in the sample *do* cross it (58 CSR, 22 HWV, 2 BIO, 1 NLP, the largest
 at 1,254,680 symbols), and none of them reached a verdict on either build — 74
 translate-fail both sides, 5 translate-fail → CPU_KILL, 4 CPU_KILL both sides.
-T9's value is for knowledge-base-scale input fed directly, which is where
-a large knowledge base sits, not for TPTP.
+T9's value is for knowledge-base-scale input fed directly, not for TPTP.
 
 ## The design of the A/B, and what was previously unmeasured
 
@@ -381,11 +380,10 @@ Roughly in order of expected value.
    failures; never built.
 
 11. **Publication** — done, with one piece deliberately dropped. The canonical
-   home of this tree is <https://github.com/madGambol/Prover9Mace4>, with the
-   local Forgejo (`chris/Prover9Mace4` on `mirror.invalid`) kept as
-   a mirror; `master` and `rc` are aligned on both. The corpus is published
-   only on the Forgejo, as `chris/Prover9Corpus`, so it is unreachable to
-   anyone arriving from GitHub — mirroring it is the one loose end here.
+   home of this tree is <https://github.com/madGambol/Prover9Mace4>, with a
+   private mirror kept in step; `master` and `rc` are aligned on both. The
+   corpus is on the private mirror only, so it is unreachable to anyone
+   arriving from GitHub — publishing it is the one loose end here.
    GPL-2 §2(a) per-file change notices are in place — 91 files, see
    `LICENSING.md` for the convention and for what was deliberately left alone.
    Upstreaming to `AlgorithmicTruth/Prover9` was **dropped**: without a total

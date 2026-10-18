@@ -66,9 +66,9 @@ done: what these two programs teach that transfers, including the one defect
 this work introduced itself and what it cost to find.
 
 **Cloning?** The canonical home is
-<https://github.com/madGambol/Prover9Mace4>. It is also mirrored to a private
-Forgejo instance, and the two are kept identical; `master` and `rc` point at
-the same commit.
+<https://github.com/madGambol/Prover9Mace4>. It is also kept on a private
+mirror, and the two are identical; `master` and `rc` point at the same
+commit.
 
 This is William McCune's **LADR-2009-11A** release of Prover9 (a resolution/
 paramodulation theorem prover for first-order and equational logic) and Mace4
@@ -247,14 +247,10 @@ come from large hand-built ontologies, 324 of them Cyc-derived.
 
 The harness and every scored sweep are published separately, as
 **Prover9Corpus**, because they are bulky and have a different licence
-footprint. That repository is **not on GitHub yet** — it lives on the Forgejo
-instance above, which is reachable only on the author's tailnet, so open an
-issue if you need it. Its scripts expect to find this tree beside them:
-
-```sh
-git clone https://mirror.invalid/Prover9Corpus.git prover9-corpus
-# the scripts default to ../Prover9Mace4/bin; BIN_DIR and TPTP_DIR override
-```
+footprint. It is **not published publicly** — it lives on a private mirror —
+so open an issue if you need it. Its scripts expect to find this tree beside
+them, in a directory named `prover9-corpus`; they default to
+`../Prover9Mace4/bin`, and `BIN_DIR` and `TPTP_DIR` override that.
 
 The TPTP library itself is in neither repository — `results/` holds problem
 *paths*, not problems — so reproducing any TPTP figure needs v9.3.1 from

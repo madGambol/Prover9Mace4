@@ -367,12 +367,8 @@ make -C test.src tier2 BASELINE=/tmp/base/bin
 The TPTP work needs two more things, neither of them in this repository: the
 TPTP library itself (v9.3.1, <https://www.tptp.org>) and the corpus repo, which
 carries the sweep drivers, the scored results and the analysis tools. The
-corpus is not on GitHub yet — it is on a Forgejo instance reachable only on the
-author's tailnet, so open an issue if you need it:
-
-```sh
-git clone https://mirror.invalid/Prover9Corpus.git prover9-corpus
-```
+corpus is not published publicly — it is on a private mirror — so open an
+issue if you need it. Clone it beside this tree as `prover9-corpus`:
 
 - `prover9-corpus/baseline_ab.sh` — the capability A/B, interleaved
 - `prover9-corpus/cross_feed.sh` — attribute a change to the input or the prover
