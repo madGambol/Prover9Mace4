@@ -357,7 +357,7 @@ still at 100 — which 17 of 40 sampled FATAL problems hit.
 ## 8. Reproducing any of it
 
 ```sh
-git clone https://mirror.invalid/Prover9Mace4.git
+git clone https://github.com/madGambol/Prover9Mace4.git
 cd Prover9Mace4
 make all                                  # builds to ./bin
 git worktree add --detach /tmp/base 7f94204 && (cd /tmp/base && make all)
@@ -366,7 +366,9 @@ make -C test.src tier2 BASELINE=/tmp/base/bin
 
 The TPTP work needs two more things, neither of them in this repository: the
 TPTP library itself (v9.3.1, <https://www.tptp.org>) and the corpus repo, which
-carries the sweep drivers, the scored results and the analysis tools:
+carries the sweep drivers, the scored results and the analysis tools. The
+corpus is not on GitHub yet — it is on a Forgejo instance reachable only on the
+author's tailnet, so open an issue if you need it:
 
 ```sh
 git clone https://mirror.invalid/Prover9Corpus.git prover9-corpus

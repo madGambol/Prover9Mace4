@@ -380,9 +380,12 @@ Roughly in order of expected value.
 10. **A `tptp_pre.sh` shim** would rescue roughly 274 further translation
    failures; never built.
 
-11. **Publication** — done, with one piece deliberately dropped. This tree is
-   at `chris/Prover9Mace4` and the corpus at `chris/Prover9Corpus` on the
-   local Forgejo (`mirror.invalid`), `master` and `rc` aligned.
+11. **Publication** — done, with one piece deliberately dropped. The canonical
+   home of this tree is <https://github.com/madGambol/Prover9Mace4>, with the
+   local Forgejo (`chris/Prover9Mace4` on `mirror.invalid`) kept as
+   a mirror; `master` and `rc` are aligned on both. The corpus is published
+   only on the Forgejo, as `chris/Prover9Corpus`, so it is unreachable to
+   anyone arriving from GitHub — mirroring it is the one loose end here.
    GPL-2 §2(a) per-file change notices are in place — 91 files, see
    `LICENSING.md` for the convention and for what was deliberately left alone.
    Upstreaming to `AlgorithmicTruth/Prover9` was **dropped**: without a total

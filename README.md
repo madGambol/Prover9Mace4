@@ -65,6 +65,11 @@ reproducer and a measurement.
 done: what these two programs teach that transfers, including the one defect
 this work introduced itself and what it cost to find.
 
+**Cloning?** The canonical home is
+<https://github.com/madGambol/Prover9Mace4>. It is also mirrored to a private
+Forgejo instance, and the two are kept identical; `master` and `rc` point at
+the same commit.
+
 This is William McCune's **LADR-2009-11A** release of Prover9 (a resolution/
 paramodulation theorem prover for first-order and equational logic) and Mace4
 (a finite-model searcher for the same input language), with the changes needed
@@ -241,9 +246,10 @@ is Commonsense Reasoning — 32 of 548 — which is also the domain whose proble
 come from large hand-built ontologies, 324 of them Cyc-derived.
 
 The harness and every scored sweep are published separately, as
-**[Prover9Corpus](https://mirror.invalid/Prover9Corpus)**,
-because they are bulky and have a different licence footprint. Its scripts
-expect to find this tree beside them:
+**Prover9Corpus**, because they are bulky and have a different licence
+footprint. That repository is **not on GitHub yet** — it lives on the Forgejo
+instance above, which is reachable only on the author's tailnet, so open an
+issue if you need it. Its scripts expect to find this tree beside them:
 
 ```sh
 git clone https://mirror.invalid/Prover9Corpus.git prover9-corpus
