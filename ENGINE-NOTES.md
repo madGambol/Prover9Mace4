@@ -1044,6 +1044,19 @@ an 8,996-problem sweep catches in an hour. The equivalent for a KB engine is a
 standing set of queries that have ever flipped between answered and unanswered,
 checked on every engine change.
 
+**Point it at the version you are replacing, not at the original.** The same
+instrument, same problem list, answers two different questions depending on
+the baseline, and only one of them is a verdict. Against the previous build a
+loss is a regression: this tree's gate reports 0 lost, 0 gained, with a noise
+floor of zero measured by giving it the same build on both sides. Against the
+2009 release it reports 184 lost and 75 gained, which is not a failure but
+section 5's differential restated — a corrected translation is usually harder
+than the wrong problem it replaces, and section 12's cross-feed is what splits
+those 184 into 187 input, 12 prover, 6 noise. Running it against the original
+and reading the loss count as a verdict is a mistake that is easy to make and
+costs an hour; this tree made it, which is why the target now names the
+baseline it wants.
+
 One more, which is about process rather than testing. The commit that
 introduced the section 11 defect **predicted it in its own message** — "making
 indexed children unsorted changes which answer is returned first, so it can

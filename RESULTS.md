@@ -48,7 +48,7 @@ checkable.
 make -C test.src tier1     # unit tests and demonstrations, about a minute
 make -C test.src tier2 BASELINE=<pristine bin>   # the full regression suite
 make -C test.src tier3 CORPUS=<list> JOBS=<n>    # see test.src/TIER3.md
-make -C test.src cap   BASELINE=<pristine bin>   # the capability gate
+make -C test.src cap   BASELINE=<previous bin>   # the capability gate
 ```
 
 | gate | what it runs | result |
@@ -56,7 +56,17 @@ make -C test.src cap   BASELINE=<pristine bin>   # the capability gate
 | tier1 | 8 unit-test binaries, an allocation audit, a cell-table test, 6 documented demonstrations, 26 translation-semantics checks | green |
 | tier2 | tier1 plus 3 more binaries, **41 regression tests**, **271 Mace4 models verified clause by clause**, a determinism harness, upstream's own `test1`/`test2`/`test3` | green |
 | tier3 | ASan+UBSan over **336** prover/problem pairs, a crash-poison sweep over **336**, valgrind memcheck over **168** | clean |
-| cap | the 294 TPTP problems that have ever changed hands against pristine | green |
+| cap | the 294 TPTP problems that have ever changed hands, against the **previous build** | green: 0 lost, 0 gained |
+
+The baseline matters for that last row, and the gate is the one place in this
+document where the wrong one gives a confusing answer. Read as pass/fail it
+wants the build being replaced, and against that it is green — with a noise
+floor of zero, measured by giving it the same build on both sides. Pointed at
+pristine it reports **184 lost, 75 gained** (294 problems, 10 s CPU, REPS=2,
+reproduced at 8 and at 63 jobs), which is section 5 restated rather than a
+failure: a corrected translation is usually a harder problem than the wrong
+one it replaces. Section 12 attributes that split — 187 input, 12 prover, 6
+noise — and the 12 were the R1 regression.
 
 **The discrimination check matters more than the pass.** A test that passes on
 the unfixed code proves nothing, so `tier2 BASELINE=` re-runs the regression

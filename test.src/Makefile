@@ -262,10 +262,25 @@ ab:
 	./ab.sh aa
 	B="$(BASELINE)" ./ab.sh ab
 
-# The CAPABILITY gate: does this build still answer the TPTP problems the
-# pristine release answers?
+# The CAPABILITY gate: does this build still answer what the PREVIOUS build
+# answered?
 #
-#   make cap BASELINE=/path/to/pristine/bin
+#   make cap BASELINE=/path/to/previous/build/bin
+#
+# WHICH BASELINE, AND WHY NOT PRISTINE.  Read as pass/fail, this gate wants the
+# build it is replacing.  Against pristine it cannot pass and is not meant to:
+# measured on the 294-problem list at 10 s CPU and REPS=2, pristine against
+# this tree is **184 lost, 75 gained** -- which is section 5 of ../RESULTS.md
+# restated, the deliberate consequence of fixing the translator, since a
+# corrected translation is usually a harder problem than the wrong one it
+# replaces.  The gate says as much when it fails: run cross_feed.sh, because a
+# changed translation means the baseline was answering a different formula.
+# Section 12 of ../ENGINE-NOTES.md is that attribution done -- 187 of the
+# losses were the input, 12 the prover, 6 noise -- and the 12 were R1.
+#
+# So: previous build for a verdict, pristine to reproduce the differential.
+# The instrument itself is sound at either: the same build on both sides
+# reports 0 lost, 0 gained at 63 jobs, so a loss it reports is signal.
 #
 # WHY THIS IS A SEPARATE TIER, AND WHY IT EXISTS AT ALL.  Every other target in
 # this file asks whether the build still does what the previous build did on
@@ -285,7 +300,7 @@ ab:
 # TPTP library's location from TPTP_DIR, which is its own to document.
 
 cap:
-	@if [ -z "$(BASELINE)" ]; then 	  echo "make cap needs BASELINE=<pristine bin dir> to compare ../bin against"; 	  exit 2; 	fi
+	@if [ -z "$(BASELINE)" ]; then 	  echo "make cap needs BASELINE=<the previous build's bin dir> to compare ../bin against"; 	  exit 2; 	fi
 	@g=$${CAP_GATE:-$$(cd ../.. && pwd)/prover9-corpus/cap_gate.sh}; 	if [ -x "$$g" ]; then 	  "$$g" "$(BASELINE)" "$$(cd .. && pwd)/bin" $${CAP_SECS:-10} $${CAP_JOBS:-}; 	else 	  echo "cap: SKIP (no $$g -- needs the prover9-corpus repo and the TPTP library)"; 	fi
 
 # Promote rc to master, refusing unless master's tree will be identical to the
