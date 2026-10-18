@@ -302,9 +302,15 @@ promote:
 # the machine it is run on but worth overriding on a shared or small one.
 # tier1 and tier2 do not parallelise at all, so JOBS does not apply to them.
 tier3:
-	@if [ -z "$(CORPUS)" ]; then \
-	  echo "tier3 needs a corpus:  make tier3 CORPUS=/path/to/list-of-inputs"; \
-	  echo "                       make tier3 CORPUS=... JOBS=2   # fewer cores"; \
+	@if [ -z "$(CORPUS)" ] || [ -z "$(JOBS)" ]; then \
+	  echo "tier3 needs both a corpus and a job count:"; \
+	  echo ""; \
+	  echo "    make tier3 CORPUS=/path/to/list-of-inputs JOBS=n"; \
+	  echo ""; \
+	  echo "JOBS is how many runs go at once.  This machine reports $$(nproc)"; \
+	  echo "core(s); each sweep also caps it by free memory and says when it"; \
+	  echo "does, so a number larger than the machine can take is lowered"; \
+	  echo "rather than honoured.  JOBS=2 works, and is slower."; \
 	  exit 2; \
 	fi
 	JOBS="$(JOBS)" ./sanitizer_sweep.sh "$(CORPUS)"

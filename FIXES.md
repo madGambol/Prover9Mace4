@@ -3115,7 +3115,7 @@ until after the work in PF2 through PF9 had already been merged.
 | --- | --- | --- |
 | `make tier1` | 7 unit tests, 6 demonstrations, the 26-case translation matrix | ~2 s |
 | `make tier2` | tier1 + 41 regression tests, 271 re-verified models, determinism, `String_buf`, the allocation counter, upstream's test1/2/3, and the baseline discrimination gate | ~3 min |
-| `make tier3 CORPUS=…` | AddressSanitizer + UBSan over the corpus, LADR's poisoned allocator against an unpoisoned control, and a valgrind memcheck sample | ~15 min |
+| `make tier3 CORPUS=… JOBS=…` | AddressSanitizer + UBSan over the corpus, LADR's poisoned allocator against an unpoisoned control, and a valgrind memcheck sample | ~15 min |
 
 **What went wrong.** tier3 was three procedures described in a Makefile
 *comment* saying they "belong at the merge-to-rc and release gates". They were

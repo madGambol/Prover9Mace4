@@ -88,8 +88,20 @@ mem_cap=$(( mem_mb / 800 ))
 [ "$mem_cap" -lt 1 ] && mem_cap=1
 cores=$(nproc)
 if [ "$mem_cap" -lt "$cores" ]; then default_jobs="$mem_cap"; else default_jobs="$cores"; fi
-jobs="${3:-${JOBS:-$default_jobs}}"
+jobs="${3:-${JOBS:-}}"
+case "$jobs" in
+  '')        echo "$0: how many concurrent runs?  pass JOBS=n, or argument 3." >&2
+             echo "  This machine allows at most $default_jobs: $cores core(s)," >&2
+             echo "  and memory for $mem_cap run(s) at 800 MB each." >&2
+             exit 2 ;;
+  *[!0-9]*)  echo "$0: JOBS must be a whole number, got '$jobs'" >&2; exit 2 ;;
+esac
 [ "$jobs" -lt 1 ] && jobs=1
+if [ "$jobs" -gt "$default_jobs" ]; then
+  echo "    JOBS=$jobs is more than this machine can take; using $default_jobs"
+  echo "    ($cores core(s), memory for $mem_cap run(s) at 800 MB each)"
+  jobs="$default_jobs"
+fi
 
 [ -n "$corpus" ] && [ -r "$corpus" ] || {
   echo "usage: $0 CORPUS_LIST [BUILD_DIR] [JOBS]" >&2; exit 2; }

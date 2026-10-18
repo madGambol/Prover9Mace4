@@ -12,7 +12,7 @@ place to look for detail; this file is for picking the work back up.
 | promotion | `make promote GATED=<commit>` — `--ff-only`, and it refuses unless master's tree will be identical to the tree the gates ran on |
 | upstream baseline | commit `25b4505` is the pristine 2009-11A tarball, so `git diff 25b4505` is every change |
 | build | `make all`; one caveat, below, about the C++ translation units |
-| gates | `make tier1`, `make tier2 BASELINE=…`, `make tier3 CORPUS=…`, plus the A/B |
+| gates | `make tier1`, `make tier2 BASELINE=…`, `make tier3 CORPUS=… JOBS=…`, plus the A/B |
 
 Startup on `Problems/CSR/CSR040-10.p` — 44,227 clauses and 7,161 distinct
 symbols after translation — went from **157.53 s to 3.80 s**, a factor of 41,
@@ -45,7 +45,7 @@ In this order. Each catches things the others cannot.
 cd test.src
 make tier1                                                  # ~2 s
 make tier2 BASELINE=/path/to/pristine-plus-build-fixes/bin   # ~3 min
-make tier3 CORPUS=~/Projects/prover9-corpus/files.txt        # ~15 min
+make tier3 CORPUS=../../prover9-corpus/files.txt JOBS=8     # ~15 min at 8
 make ab   BASELINE=/path/to/previous/bin                     # ~20 min
 ```
 
