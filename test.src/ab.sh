@@ -76,7 +76,11 @@
 mode=${1:-ab}
 A=${A:-../bin}
 B=${B:-}
-CORPUS=${CORPUS:-$HOME/Projects/prover9-corpus/comparable.txt}
+# The corpus is a separate repo -- it holds TPTP inputs, not code -- so the
+# default is a SIBLING clone of this tree rather than a path into one
+# particular home directory, and a clone anywhere then works with no
+# argument.  CORPUS= still wins, absolute or relative, exactly as before.
+CORPUS=${CORPUS:-$(cd "$(dirname "$0")/../.." && pwd)/prover9-corpus/comparable.txt}
 
 # Default concurrency is derived, not fixed: one run per core, and no more
 # than memory allows at the per-run ceiling.  A fixed number is wrong on every

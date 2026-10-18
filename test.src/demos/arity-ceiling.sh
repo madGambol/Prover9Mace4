@@ -84,11 +84,15 @@
 # RUN IT
 #   test.src/demos/arity-ceiling.sh [bin-directory]
 #
-#   Needs the TPTP library at ~/Projects/TPTP for the real problems; without
-#   it, only the synthetic check runs.
+#   Needs the TPTP library for the real problems, and TPTP_DIR= says where it
+#   is.  Without it only the synthetic check runs -- that is the half which
+#   needs no library at all, so a missing library is a skip, not a failure.
+#   The library lives outside any clone and is far too large to vendor, so
+#   there is no portable default to fall back to; the skip message therefore
+#   names TPTP_DIR rather than leaving a path nobody else has unexplained.
 #------------------------------------------------------------------------------
 B="${1:-$(cd "$(dirname "$0")/../.." && pwd)/bin}"
-T="$HOME/Projects/TPTP/TPTP-v9.3.1"
+T="${TPTP_DIR:-$HOME/Projects/TPTP/TPTP-v9.3.1}"
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 
 echo "synthetic: a predicate of arity 300, which the old ceiling refused"
@@ -126,5 +130,6 @@ if [ -d "$T" ]; then
     fi
   done
 else
-  echo "(TPTP not found at $T, skipping the real problems)"
+  echo "(no TPTP library at $T -- set TPTP_DIR to a TPTP-v9.x directory;"
+  echo " skipping the real problems.  The synthetic check above still stands.)"
 fi

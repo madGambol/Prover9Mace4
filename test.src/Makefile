@@ -278,11 +278,15 @@ ab:
 # message is not a gate, which is why this is a target.
 #
 # It needs the TPTP library and the corpus repo, so it SKIPS cleanly when they
-# are absent rather than failing a build that cannot run it.
+# are absent rather than failing a build that cannot run it.  The corpus is a
+# separate repo: the default below is a SIBLING clone of this tree rather than
+# a path into one particular home directory, so a clone anywhere finds it, and
+# CAP_GATE= points at it wherever else it sits.  The gate script takes the
+# TPTP library's location from TPTP_DIR, which is its own to document.
 
 cap:
 	@if [ -z "$(BASELINE)" ]; then 	  echo "make cap needs BASELINE=<pristine bin dir> to compare ../bin against"; 	  exit 2; 	fi
-	@g=$${CAP_GATE:-$$HOME/Projects/prover9-corpus/cap_gate.sh}; 	if [ -x "$$g" ]; then 	  "$$g" "$(BASELINE)" "$$(cd .. && pwd)/bin" $${CAP_SECS:-10} $${CAP_JOBS:-}; 	else 	  echo "cap: SKIP (no $$g -- needs the prover9-corpus repo and the TPTP library)"; 	fi
+	@g=$${CAP_GATE:-$$(cd ../.. && pwd)/prover9-corpus/cap_gate.sh}; 	if [ -x "$$g" ]; then 	  "$$g" "$(BASELINE)" "$$(cd .. && pwd)/bin" $${CAP_SECS:-10} $${CAP_JOBS:-}; 	else 	  echo "cap: SKIP (no $$g -- needs the prover9-corpus repo and the TPTP library)"; 	fi
 
 # Promote rc to master, refusing unless master's tree will be identical to the
 # tree the gates ran against.  See the comments in promote.sh: tree identity
