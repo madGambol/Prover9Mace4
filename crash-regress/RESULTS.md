@@ -44,7 +44,7 @@ input is valid or the option legal), **sanitizer** (ASan/UBSan report),
 | D2b | same | `directproof < longtok.txt` | crash | pass | **crash** | `directproof.c:704,720,737` |
 | T2a | long name truncated in msg (usability) | `tptp_to_ladr < inc4000.p` | abort | pass | **fatal**, name cut at 60 chars | safe, not a crash |
 | T2b | same, prover9 | `prover9 -f <4000 y>` | abort | pass | **abort** | this is M2 at 4000 chars |
-| T3 | circular `include()` recursion | `tptp_to_ladr < loop.p` | crash | crash | **pass** | new has an include-depth limit of 20: clean fatal error. FIXES' T3 only deepened the recursion, so old-fixed still crashes |
+| T3 | circular `include()` recursion | `tptp_to_ladr < loop.p` | crash | crash | **pass** | new has an include-depth limit of 20: clean fatal error. FIXES' T3 only deepened the recursion, so old-fixed still crashed at the time of this run; the same depth limit was ported to this tree afterwards (FIXES.md T3, amended 2026-10-27), and old-fixed now passes |
 | TR | control: translate + prove | `tptp_to_ladr < grp.p \| prover9` | pass | pass | pass | |
 | T4a | `~ ! [X] : p(X)` loses the negation | `tptp_to_ladr < neg.p` | wrong | pass | **wrong** (emits `p(X)`) | `ladr/tptp_trans.c:377-401`, identical to 2009 |
 | T4b | same, semantic | `neg2.p` must prove | wrong | pass | **wrong** | |
