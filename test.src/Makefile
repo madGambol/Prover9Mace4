@@ -22,7 +22,7 @@
 #  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
 
 # CHANGE NOTICE (GPL-2, section 2a): this file was modified by Chris Arena on
-# 2026-10-11 through 2026-10-16, and is not as William McCune released it in
+# 2026-10-11 through 2026-10-27, and is not as William McCune released it in
 # LADR-2009-11A. What changed and why is in FIXES.md; this file's own diff
 # against the unmodified release is
 #
@@ -131,7 +131,7 @@ check: tier2
 #
 #   tier1  about 2 seconds.  The demonstrations and the semantic translation
 #          matrix.  Fast enough to run on every edit.
-#   tier2  about 2 1/2 minutes.  Everything: the 41 regression tests, the
+#   tier2  about 2 1/2 minutes.  Everything: the 42 regression tests, the
 #          String_buf unit test, 271 re-verified models, and test1/2/3.
 #
 # Deliberately NOT a sampled tier2: the whole of tier2 costs under three
@@ -239,7 +239,7 @@ tier2: strbuf_test memory_test discrim_test tier1
 	  done; \
 	  ./regress.sh "$(BASELINE)" > /tmp/ladr-baseline-run.txt 2>&1; \
 	  n=$$(grep -c '  FAIL  ' /tmp/ladr-baseline-run.txt); \
-	  echo "    $$n of 41 fail against the baseline"; \
+	  echo "    $$n of 42 fail against the baseline"; \
 	  if [ "$$n" -lt 30 ]; then \
 	    echo "    TOO FEW: tests that pass on the unfixed code prove nothing"; \
 	    exit 1; \

@@ -146,6 +146,15 @@ chk "T2  prover9 likewise reports a long -f name in full" \
     'timeout 30 "$B/prover9" -f "$LONG4000" 2>&1 \
        | grep -q "read_all_input, file $LONG4000 not found"'
 
+# T3: read_tptp_input follows include() by recursing, with no bound, so a file
+# that includes itself recursed until the stack ran out and the translator
+# segfaulted, however small the frame was made.  It must now stop at the
+# include-depth limit with a fatal error (exit 1).
+printf "include('loop.p').\nfof(a,axiom,p(x)).\n" > "$W/loop.p"
+chk "T3  tptp_to_ladr on a self-including file (unbounded recursion)" \
+    '( cd "$W" && timeout 60 "$B/tptp_to_ladr" < loop.p > loop.out 2>&1 ); \
+       [ $? -eq 1 ] && grep -q "include depth limit (20) exceeded" "$W/loop.out"'
+
 # T   ...and the translators must still do their job: a TPTP problem has to
 # survive translation well enough for prover9 to prove it, and come back.
 cat > "$W/grp.p" <<'TPTP'

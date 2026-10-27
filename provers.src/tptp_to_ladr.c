@@ -17,7 +17,7 @@
 */
 
 /*  CHANGE NOTICE (GPL-2, section 2a): this file was modified by Chris Arena
-    on 2026-10-11 through 2026-10-14, and is not as William McCune released it
+    on 2026-10-11 through 2026-10-27, and is not as William McCune released it
     in LADR-2009-11A. What changed and why is in FIXES.md; this file's own
     diff against the unmodified release is
 
@@ -237,6 +237,13 @@ FILE *distinctness_axioms(void)
  * the whole file -- quietly *adding* axioms the problem had excluded, which
  * can make an unprovable conjecture provable.  <names> below is that list, or
  * NULL for the whole file.
+ *
+ * An include is followed by recursing, so a file that includes itself,
+ * directly or through others, recursed until the stack ran out.  Shrinking
+ * the frame (T3 in FIXES.md) only moved the crash deeper.  <depth> counts the
+ * open includes instead, and past 20 the translator stops with a message.
+ * TPTP's axiom files do not include one another, so a real problem nests one
+ * level deep.
  */
 
 static
@@ -254,7 +261,7 @@ BOOL name_selected(Term name, Term names)
 
 static
 void read_tptp_input(FILE *fin, FILE *fout, FILE *ferr,
-		     Plist *assumps, Plist *goals, Term names)
+		     Plist *assumps, Plist *goals, Term names, int depth)
 {
   Term t = read_term(fin, fout);
 
@@ -274,6 +281,9 @@ void read_tptp_input(FILE *fin, FILE *fout, FILE *ferr,
 	fatal_error("read_tptp_input: include inside a selective include "
 		    "is not supported");
 
+      if (depth >= 20)
+	fatal_error("read_tptp_input: include depth limit (20) exceeded");
+
       if (*fname2 == '\'' || *fname2 == '"') {
 	fname2[strlen(fname2)-1] = '\0';
 	fname2++;
@@ -286,7 +296,7 @@ void read_tptp_input(FILE *fin, FILE *fout, FILE *ferr,
       {
 	FILE *rew = rewrite_distinct_objects(fin2);
 	fclose(fin2);
-	read_tptp_input(rew, fout, ferr, assumps, goals, sel);
+	read_tptp_input(rew, fout, ferr, assumps, goals, sel, depth + 1);
 	fclose(rew);
       }
       free(fname);
@@ -333,7 +343,7 @@ int main(int argc, char **argv)
 
   {
     FILE *rew = rewrite_distinct_objects(stdin);
-    read_tptp_input(rew, stdout, stderr, &assumps, &goals, NULL);
+    read_tptp_input(rew, stdout, stderr, &assumps, &goals, NULL, 0);
     fclose(rew);
   }
 
@@ -352,7 +362,7 @@ int main(int argc, char **argv)
 	   Distinct_count, (Distinct_count * (Distinct_count - 1)) / 2);
     if (Distinct_count > 1) {
       FILE *ax = distinctness_axioms();
-      read_tptp_input(ax, stdout, stderr, &assumps, &goals, NULL);
+      read_tptp_input(ax, stdout, stderr, &assumps, &goals, NULL, 0);
       fclose(ax);
     }
   }
