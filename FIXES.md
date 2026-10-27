@@ -40,7 +40,7 @@ defaults to `-std=gnu23`.
 | T5 | `tptp_to_ladr` emitted single-quoted TPTP formula names into `label(...)`, which LADR's own reader rejects, so the translator produced files its own prover could not read. 382 problems affected | `ladr/tptp_trans.c:437` | correctness |
 | T2 | The five messages that report a filename were sized by a round number (1024), so a long name was reported truncated; sized from `PATH_MAX` + 20% | `ladr/header.h`, 5 call sites | hardening |
 | M8 | **Use-after-free in `zap_flatterm`, on every call** — the loop test re-reads `f->end` after the first iteration has freed `f`. Hit by the default prover9 run; invisible to valgrind and ASan because the block goes to an avail list, not to libc | `ladr/flatterm.c:152` | memory safety |
-| T3 | ...and that put a 4953-byte array in five frames, one of them recursive, cutting circular-`include()` depth from 40262 to 1651. The message is now measured with `snprintf(NULL,0,...)` and allocated to fit: no array, no truncation at any length, depth 87255 | `ladr/fatal.c`, 5 call sites | hardening |
+| T3 | ...and that put a 4953-byte array in five frames, one of them recursive, cutting circular-`include()` depth from 40262 to 1651. The message is now measured with `snprintf(NULL,0,...)` and allocated to fit: no array, no truncation at any length, depth 87255. **That only deepened the recursion: a circular `include()` still crashed.** `read_tptp_input` now stops at an include depth of 20 with a fatal error | `ladr/fatal.c`, 5 call sites; `provers.src/tptp_to_ladr.c` | hardening, **crash** |
 | PF1 | `String_buf` append is O(n²) | `ladr/strbuf.c` | performance |
 | PF2 | symbol multiset built and read back by linear search | `ladr/glist.c` | performance |
 | PF3 | `predicate_elimination` is O(R³); recomputes the whole candidate set per symbol | `provers.src/pred_elim.c` | performance |
@@ -945,6 +945,51 @@ tests check by matching the full text.
 The five sites were the ones that format a filename. Buffers elsewhere in the
 tree are sized by their own content, and the
 `-Wformat-truncation=2 -Wformat-overflow=2` rebuild still reports nothing.
+
+#### Amended 2026-10-27: the recursion itself is now bounded
+
+Everything above made a circular `include()` crash *later*. None of it stopped
+the crash. Each depth quoted is where the stack ran out, and 87255 levels is
+still a segfault, so the entry read as closing a defect that it had only moved.
+`crash-regress/` showed this when it re-ran this document's reproducers
+against other LADR builds. This tree's `tptp_to_ladr < loop.p` still died with
+SIGSEGV. LADR-2026 (AlgorithmicTruth/Prover9) stops with a fatal error,
+because it bounds the include depth at 20.
+
+That bound is the fix, and it is ported here. `read_tptp_input` takes the
+number of includes already open, and the include branch refuses to go past 20:
+
+```c
+if (depth >= 20)
+  fatal_error("read_tptp_input: include depth limit (20) exceeded");
+```
+
+```
+$ tptp_to_ladr < loop.p        # loop.p: include('loop.p'). fof(a,axiom,p(x)).
+...
+Fatal error:  read_tptp_input: include depth limit (20) exceeded
+```
+
+It exits with status 1 after 20 levels of `% Including file loop.p`. A mutual
+cycle (`a.p` includes `b.p`, which includes `a.p`) stops the same way. The
+message is LADR-2026's, word for word, so the two trees fail alike.
+
+- **Why a depth limit rather than cycle detection.** A depth needs no record
+  of which files are open. It also stops a chain that is deep without being a
+  cycle.
+- **Why 20 costs nothing real.** In TPTP v9.3.1 no file under `Axioms/`
+  contains an `include()`, so a problem nests exactly one level.
+
+The frame-size work above still stands: it is what reports the name in full
+and keeps the array off the stack. The depth figures, though, are now
+history, since no input reaches them.
+
+`regress.sh` gains a T3 case: a self-including file must give exit status 1
+and that message. It fails against the build just before this change, which
+segfaults after 74673 levels with today's frame (GCC 15.2, 8 MB stack). It
+also fails against the pristine-plus-build-fixes baseline (`04567a4`), which
+now fails 34 of the 42 tests. It passes here. In `crash-regress`, T3 moves
+from crash to pass, and no other verdict changes against `old-fixed`.
 
 ---
 
@@ -3113,7 +3158,7 @@ until after the work in PF2 through PF9 had already been merged.
 | tier | what it is | cost |
 | --- | --- | --- |
 | `make tier1` | 7 unit tests, 6 demonstrations, the 26-case translation matrix | ~2 s |
-| `make tier2` | tier1 + 41 regression tests, 271 re-verified models, determinism, `String_buf`, the allocation counter, upstream's test1/2/3, and the baseline discrimination gate | ~3 min |
+| `make tier2` | tier1 + 42 regression tests, 271 re-verified models, determinism, `String_buf`, the allocation counter, upstream's test1/2/3, and the baseline discrimination gate | ~3 min |
 | `make tier3 CORPUS=… JOBS=…` | AddressSanitizer + UBSan over the corpus, LADR's poisoned allocator against an unpoisoned control, and a valgrind memcheck sample | ~15 min |
 
 **What went wrong.** tier3 was three procedures described in a Makefile
