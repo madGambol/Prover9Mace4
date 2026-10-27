@@ -241,8 +241,11 @@ function bodies of `build/base` against the 2026 tree.
 
 ## Not runtime tests (skipped)
 
-B1-B4 are build-only. These are hygiene or hardening: M4 (names bounded by
-MAX_NAME 51, unchanged in 2026), M6, F2 and S1-S5. Performance-only: PF1-PF4,
+B1-B4 are build-only. These are hygiene or hardening: M4, M6, F2 and S1-S5.
+(M4 was filed as hardening because names were thought to be bounded by
+MAX_NAME. They aren't. A long unknown `kbo_weights` symbol crashes both the
+unpatched 2009 tree and 2026; see FIXES.md M4's amendment. It has no case
+here.) Performance-only: PF1-PF4,
 PF6-PF10 and CXX. L1 is dead code, unfixed in the old tree too. R1 is the old
 project's own regression, introduced by its PF10, and does not apply to 2026.
 

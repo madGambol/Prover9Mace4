@@ -19,7 +19,7 @@ defaults to `-std=gnu23`.
 | M1 | Stack buffer overflow, `mace4 -n 10000000` **aborts** | `mace4.src/msearch.c:891` | memory safety |
 | M2 | Stack buffer overflow on a long input filename | `ladr/top_input.c:892` | memory safety |
 | M3 | Same, in 4 more programs — in `tptp_to_ladr` the name comes from a TPTP `include()`, so it is reachable from a problem file, not just the command line (**T1**) | `prooftrans`, `directproof`, `interpformat`, `tptp_to_ladr` | memory safety |
-| M4 | Two more unbounded message buffers | `ladr/termorder.c`, `ladr/options.c` | hardening |
+| M4 | Two more unbounded message buffers. **The `termorder.c` one is reachable from input**: a long unknown symbol in `kbo_weights` aborts the unpatched prover9 | `ladr/termorder.c`, `ladr/options.c` | hardening, **crash** |
 | M5 | Stack buffer overflow from `prooftrans -label`; **aborts** | `apps.src/prooftrans.c:481` | memory safety |
 | M6 | All 30 remaining `sprintf` → `snprintf`, buffers sized to the widest output; exposed a too-small buffer in `interp.c` | whole tree | memory safety |
 | M7 | **Heap buffer overflow on every production-mode run** — `Op_codes` is sized before the symbols that index it are created | `ladr/dollar.c:68` | memory safety |
@@ -32,7 +32,7 @@ defaults to `-std=gnu23`.
 | U3 | `double`→`int` conversion defeats `sos_limit` | `provers.src/giv_select.c:462` | wrong results |
 | N1 | `assign(max_minutes,-1)` **aborts the prover** | `ladr/options.c:713` | usability |
 | N2 | Signed overflow in the parm multiplier | `ladr/options.c:713` | UB |
-| N3 | `assign(pick_given_ratio,-1)` **aborts the prover** | `ladr/options.c:713` | usability |
+| N3 | `assign(pick_given_ratio,-1)` **aborts the prover**. The fix's clamp made `mace4 -n 0` and `-n 1` report a false "exhausted" instead of a fatal error (**not yet fixed**) | `ladr/options.c:713` | usability |
 | S1 | Spurious outer loop, correct only by accident | `mace4.src/print.c:107` | latent |
 | S2–S4 | `\|` for `\|\|`, `BOOL` holding a non-`BOOL` enum, pointer→`int` | `clash.c`, `paramod.c`, `flatdemod.c`, `avltree.c` | hygiene |
 | S5 | Arithmetic on `void *` in the allocator — a GCC extension, not standard C | `ladr/memory.c:58,78` | portability |
@@ -381,6 +381,37 @@ Also audited and found **safe**: `ladr/symbols.c` `next_skolem_symbol`
 `ladr/just.c:1050` (`char s[21]`, max 12 written), and the three
 `[strlen(x)-1]` indexings in `ladr/weight2.c`, `ladr/parse.c` and
 `provers.src/tptp_to_ladr.c` (each provably reached with length ≥ 1).
+
+#### Amended 2026-10-27: the `termorder.c` buffer was reachable from input
+
+The premise above is wrong for symbol names. `MAX_NAME` bounds only the names
+LADR makes up itself (`gen_new_symbol`, `fresh_symbol`). Nothing bounds a name
+read from input. So a `kbo_weights` entry for a symbol that isn't in the
+input, with a name of about 165 characters or more, overflowed `mess[200]`:
+
+```
+assign(order, kbo).
+list(kbo_weights).
+  zzz...z = 3.          % 300 z's; no such symbol in the input
+end_of_list.
+```
+
+```
+$ prover9 -f kbo.in            # unpatched, 04567a4
+*** buffer overflow detected ***: terminated        (SIGABRT, exit 134)
+```
+
+So M4 was a crash, not just hardening. The `snprintf` conversion above
+already fixed it. In this tree the same input stops with
+`Fatal error:  init_kbo_weights, symbol zzz…` and exit status 1. The message
+is cut off to fit its buffer, which is harmless. LADR-2026
+(AlgorithmicTruth/Prover9) had the same overflow. It turned up while this
+document's fixes were being ported there.
+
+The premise holds for the `options.c` site, but for a different reason. Its
+branch is disabled (`else if (FALSE && ...)`), and every caller of
+`init_flag` passes a flag name written in the program, never one read from
+input.
 
 ---
 
@@ -1160,6 +1191,39 @@ range-checked and still errors, as before — only derived values are clamped.
 
 The last three show that in-range derivations are untouched. Mace4 has no
 `max_minutes`/`max_hours`/`max_days`, so it is unaffected.
+
+#### Amended 2026-10-27: Mace4 is affected, and `-n 0` and `-n 1` now give a false "exhausted"
+
+The last sentence above is wrong. Mace4 derives parms too. `domain_size`
+(`-n`) sets both `start_size` and `end_size` (`mace4.src/msearch.c:203-204`),
+and `start_size` has a minimum of 2. Unpatched, `-n 0` and `-n 1` stopped with
+a fatal error. The clamp now raises the derived `start_size` to 2 while
+`end_size` stays at 0 or 1. The search then covers no domain size at all, but
+Mace4 still reports that it is exhausted:
+
+```
+$ mace4 -n 1 -f m.in           # unpatched, 04567a4
+assign_parm: parm start_size, value 1 out of range [2..2147483647].
+Fatal error:  assign_parm                                  (exit 1)
+
+$ mace4 -n 1 -f m.in           # this tree
+    % assign(domain_size, 1) -> assign(start_size, 2).
+    % assign(domain_size, 1) -> assign(end_size, 1).
+...
+------ process ... exit (exhausted) ------                 (exit 2)
+```
+
+"Exhausted" tells the user that every size in range was searched and no model
+was found. Here that is false, because no size was searched. **Not yet
+fixed.**
+
+The fix for LADR-2026 avoids this by clamping only what N1–N3 need:
+- `-1` passes on unscaled;
+- products saturate at the dependent parm's maximum;
+- `-1` is raised to the dependent parm's minimum (`weight_part 0`).
+
+Any other derived value that is out of range still reaches the range check,
+so `mace4 -n 0` remains a fatal error there.
 
 ## Logic defects that currently work only by accident
 
