@@ -25,7 +25,7 @@
 
 
 # CHANGE NOTICE (GPL-2, section 2a): this file was modified by Chris Arena on
-# 2026-10-11 through 2026-10-16, and is not as William McCune released it in
+# 2026-10-11 through 2026-10-30, and is not as William McCune released it in
 # LADR-2009-11A. What changed and why is in FIXES.md; this file's own diff
 # against the unmodified release is
 #
@@ -122,7 +122,7 @@ if (program != 'prover9' and program != 'mace4') or (list != 'assumptions' and l
     sys.exit(1)
 
 if not os.path.isfile(head_fname):
-    sys.stderr.write('head file %s not found\n' % head)
+    sys.stderr.write('head file %s not found\n' % head_fname)
     sys.exit(1)
 
 cand_fname = 'cand_%d.in' % os.getpid()

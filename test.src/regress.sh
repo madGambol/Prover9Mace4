@@ -292,6 +292,16 @@ chk "X   attack runs and writes its interps file" \
     'cd "$W" && rm -f interps && timeout 120 "$B/attack" head.in interps < cands.txt 2>&1 | grep -q "checked" && [ -s interps ]'
 chk "X5  gvizify is executable and emits graphviz dot" \
     '[ -x "$B/gvizify" ] && timeout 60 "$B/gvizify" "$W/p.xml" 2>/dev/null | grep -q "strict digraph"'
+# X6, X7: errors in the scripts' own code, found after X1-X5 made them run.
+# gvizify prints its header before it reaches reformat(), so X7 checks the
+# exit status and the absence of a traceback, not just the output.
+chk "X6  looper names a missing head file (no NameError)" \
+    'cd "$W" && timeout 30 "$B/looper" mace4 assumptions no-such-head.in < cands.txt > lh.out 2>&1;
+     [ $? -eq 1 ] && grep -q "head file no-such-head.in not found" lh.out && ! grep -q Traceback lh.out'
+chk "X7  gvizify --minwidth and --maxwidth take integers" \
+    'timeout 60 "$B/gvizify" --minwidth=40 --maxwidth=50 "$W/p.xml" > "$W/g1.dot" 2>&1 \
+       && timeout 60 "$B/gvizify" --maxwidth=20 "$W/p.xml" > "$W/g2.dot" 2>&1 \
+       && ! grep -q Traceback "$W/g1.dot" "$W/g2.dot" && grep -q "strict digraph" "$W/g1.dot"'
 chk "X   prover9-mace4 races both and returns the winner" \
     'timeout 90 "$B/prover9-mace4" -f "$BASE/prover9.examples/x2.in" 2>/dev/null | grep -q "THEOREM PROVED"'
 

@@ -54,6 +54,7 @@ defaults to `-std=gnu23`.
 | T9 | discrimination index key was a `short`; above 32,767 symbols the prover aborted | `ladr/discrim.h` | crash / lost problems |
 | CXX | two hand-rolled containers replaced by `unordered_map`/`vector` behind the same C interfaces | `ladr/i2accum_cxx.cpp` | maintainability |
 | X1–X5 | All 4 installed helper scripts are unrunnable | `utilities/` | broken tooling |
+| X6, X7 | `looper` raises NameError on a missing head file; `gvizify --minwidth`/`--maxwidth` crash under Python 3 | `utilities/looper`, `utilities/gvizify` | broken tooling |
 | L1 | `demod1` drops a term its callee may have freed | `ladr/demod.c:376` | latent, reported only |
 
 All fixed except **L1**, which is in a function with no callers anywhere in the
@@ -2318,6 +2319,56 @@ results, `attack` filters candidates and writes its interpretation file,
 `gvizify` turns `prooftrans xml` output into valid graphviz `dot`, and
 `prover9-mace4 -f file` races the two provers and returns the winner's output.
 
+Those runs only covered the scripts' normal paths. These two were found on
+2026-10-30, when the same scripts were fixed in LADR-2026
+(AlgorithmicTruth/Prover9):
+
+### X6 — `looper` raises NameError instead of naming a missing head file
+`utilities/looper:125`
+
+```python
+if not os.path.isfile(head_fname):
+    sys.stderr.write('head file %s not found\n' % head)    # no such name
+```
+
+```
+$ looper mace4 assumptions no-such-head.in < cands.txt
+Traceback (most recent call last):
+  ...
+NameError: name 'head' is not defined
+```
+
+This bug is McCune's, older than any port: Python 2 raised the same
+NameError. **Fix**: `head_fname`. The script now prints
+`head file no-such-head.in not found` and exits 1, like its other argument
+errors.
+
+### X7 — `gvizify --minwidth` and `--maxwidth` crash under Python 3
+`utilities/gvizify:148-151`
+
+The two options have no `type="int"`. Their defaults (12 and 17) are ints, but
+a value given on the command line or in `GVIZIFY` stays a string, and
+`reformat()` then compares it with a length and adds 1 to it:
+
+```
+$ gvizify --minwidth=40 --maxwidth=50 proof.xml
+TypeError: '<=' not supported between instances of 'int' and 'str'
+$ gvizify --maxwidth=20 proof.xml
+TypeError: can only concatenate str (not "int") to str
+```
+
+The X2 port exposed it. Python 2 ordered every int below every str, so
+`--minwidth` silently turned line wrapping off instead of failing.
+`--maxwidth` given alone already failed under Python 2. **Fix**: `type="int"`
+on both options, so the widths take effect. A width that isn't a number is now
+refused with an optparse usage error (exit 2). gvizify's header is printed
+before `reformat()` runs, so the crash left a truncated `.dot` file behind.
+`--rotation` also has an int default and no type, but its value is only ever
+formatted with `%s`, so it is fine.
+
+`regress.sh` gains a case for each. Both fail on the scripts as they were and
+pass now.
+
 ### Known limitation, deliberately left alone
 `utilities/prover9-mace4` reports failure as soon as the *first* of the two
 processes exits, even when that one failed and the other would have succeeded:
@@ -3234,7 +3285,7 @@ until after the work in PF2 through PF9 had already been merged.
 | tier | what it is | cost |
 | --- | --- | --- |
 | `make tier1` | 7 unit tests, 6 demonstrations, the 26-case translation matrix | ~2 s |
-| `make tier2` | tier1 + 43 regression tests, 271 re-verified models, determinism, `String_buf`, the allocation counter, upstream's test1/2/3, and the baseline discrimination gate | ~3 min |
+| `make tier2` | tier1 + 45 regression tests, 271 re-verified models, determinism, `String_buf`, the allocation counter, upstream's test1/2/3, and the baseline discrimination gate | ~3 min |
 | `make tier3 CORPUS=… JOBS=…` | AddressSanitizer + UBSan over the corpus, LADR's poisoned allocator against an unpoisoned control, and a valgrind memcheck sample | ~15 min |
 
 **What went wrong.** tier3 was three procedures described in a Makefile
