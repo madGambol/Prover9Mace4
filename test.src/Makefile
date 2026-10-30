@@ -131,7 +131,7 @@ check: tier2
 #
 #   tier1  about 2 seconds.  The demonstrations and the semantic translation
 #          matrix.  Fast enough to run on every edit.
-#   tier2  about 2 1/2 minutes.  Everything: the 42 regression tests, the
+#   tier2  about 2 1/2 minutes.  Everything: the 43 regression tests, the
 #          String_buf unit test, 271 re-verified models, and test1/2/3.
 #
 # Deliberately NOT a sampled tier2: the whole of tier2 costs under three
@@ -239,7 +239,7 @@ tier2: strbuf_test memory_test discrim_test tier1
 	  done; \
 	  ./regress.sh "$(BASELINE)" > /tmp/ladr-baseline-run.txt 2>&1; \
 	  n=$$(grep -c '  FAIL  ' /tmp/ladr-baseline-run.txt); \
-	  echo "    $$n of 42 fail against the baseline"; \
+	  echo "    $$n of 43 fail against the baseline"; \
 	  if [ "$$n" -lt 30 ]; then \
 	    echo "    TOO FEW: tests that pass on the unfixed code prove nothing"; \
 	    exit 1; \

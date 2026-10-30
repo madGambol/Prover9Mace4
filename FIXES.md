@@ -32,7 +32,7 @@ defaults to `-std=gnu23`.
 | U3 | `double`→`int` conversion defeats `sos_limit` | `provers.src/giv_select.c:462` | wrong results |
 | N1 | `assign(max_minutes,-1)` **aborts the prover** | `ladr/options.c:713` | usability |
 | N2 | Signed overflow in the parm multiplier | `ladr/options.c:713` | UB |
-| N3 | `assign(pick_given_ratio,-1)` **aborts the prover**. The fix's clamp made `mace4 -n 0` and `-n 1` report a false "exhausted" instead of a fatal error (**not yet fixed**) | `ladr/options.c:713` | usability |
+| N3 | `assign(pick_given_ratio,-1)` **aborts the prover**. The first fix's clamp made `mace4 -n 0` and `-n 1` report a false "exhausted" instead of a fatal error; the clamp is now limited to the `-1` sentinel | `ladr/options.c:713` | usability |
 | S1 | Spurious outer loop, correct only by accident | `mace4.src/print.c:107` | latent |
 | S2–S4 | `\|` for `\|\|`, `BOOL` holding a non-`BOOL` enum, pointer→`int` | `clash.c`, `paramod.c`, `flatdemod.c`, `avltree.c` | hygiene |
 | S5 | Arithmetic on `void *` in the allocator — a GCC extension, not standard C | `ladr/memory.c:58,78` | portability |
@@ -1206,7 +1206,7 @@ $ mace4 -n 1 -f m.in           # unpatched, 04567a4
 assign_parm: parm start_size, value 1 out of range [2..2147483647].
 Fatal error:  assign_parm                                  (exit 1)
 
-$ mace4 -n 1 -f m.in           # this tree
+$ mace4 -n 1 -f m.in           # this tree, before the fix below
     % assign(domain_size, 1) -> assign(start_size, 2).
     % assign(domain_size, 1) -> assign(end_size, 1).
 ...
@@ -1214,16 +1214,28 @@ $ mace4 -n 1 -f m.in           # this tree
 ```
 
 "Exhausted" tells the user that every size in range was searched and no model
-was found. Here that is false, because no size was searched. **Not yet
-fixed.**
+was found. Here that was false, because no size was searched.
 
-The fix for LADR-2026 avoids this by clamping only what N1–N3 need:
-- `-1` passes on unscaled;
-- products saturate at the dependent parm's maximum;
-- `-1` is raised to the dependent parm's minimum (`weight_part 0`).
+**Fix (2026-10-30).** Clamp only what N1–N3 need, as the fix for LADR-2026
+does:
+- `-1` passes on unscaled.
+- Products saturate at the dependent parm's maximum.
+- A negative value is raised to the dependent parm's minimum
+  (`weight_part 0`).
 
-Any other derived value that is out of range still reaches the range check,
-so `mace4 -n 0` remains a fatal error there.
+Nothing else is clamped up. A non-negative value that derives below the
+minimum still reaches the range check, so `mace4 -n 0` and `-n 1` are fatal
+errors again, as they were unpatched. The change is one condition in
+`assign_parm`:
+
+```c
+if (val < 0 && dval < Parms[p->id].min)    /* was: if (dval < Parms[p->id].min) */
+  dval = Parms[p->id].min;
+```
+
+Every row of the table above is unchanged. `regress.sh` gains a case:
+`mace4 -n 0` and `-n 1` must stop with a fatal error. It passes against the
+baseline too, because it guards the fix and not an original defect.
 
 ## Logic defects that currently work only by accident
 
@@ -3222,7 +3234,7 @@ until after the work in PF2 through PF9 had already been merged.
 | tier | what it is | cost |
 | --- | --- | --- |
 | `make tier1` | 7 unit tests, 6 demonstrations, the 26-case translation matrix | ~2 s |
-| `make tier2` | tier1 + 42 regression tests, 271 re-verified models, determinism, `String_buf`, the allocation counter, upstream's test1/2/3, and the baseline discrimination gate | ~3 min |
+| `make tier2` | tier1 + 43 regression tests, 271 re-verified models, determinism, `String_buf`, the allocation counter, upstream's test1/2/3, and the baseline discrimination gate | ~3 min |
 | `make tier3 CORPUS=… JOBS=…` | AddressSanitizer + UBSan over the corpus, LADR's poisoned allocator against an unpoisoned control, and a valgrind memcheck sample | ~15 min |
 
 **What went wrong.** tier3 was three procedures described in a Makefile

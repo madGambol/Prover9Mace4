@@ -265,6 +265,12 @@ chk "N   assign(max_hours,3) still derives 10800" \
     'opt "assign(max_hours,3)." | grep -q "max_seconds, 10800"'
 chk "N   assign(pick_given_ratio,4) still derives 4" \
     'opt "assign(pick_given_ratio,4)." | grep -q "weight_part, 4"'
+# ...and without clamping a derived value the user can correct.  Clamping
+# start_size up to 2 made these search no size and exit "exhausted".  This
+# one passes against the baseline as well: it guards the fix, not a defect.
+chk "N   mace4 -n 0 and -n 1 still refused, not \"exhausted\"" \
+    'timeout 30 "$B/mace4" -n 0 -f "$W/tiny.in" 2>&1 | grep -q "Fatal error" \
+       && timeout 30 "$B/mace4" -n 1 -f "$W/tiny.in" 2>&1 | grep -q "Fatal error"'
 
 # U1: signed overflow in init_giv_select on a default run.  Only a UBSan or
 # -ftrapv build can observe this, so just check prover9 still runs normally.

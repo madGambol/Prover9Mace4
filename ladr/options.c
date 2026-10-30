@@ -17,7 +17,7 @@
 */
 
 /*  CHANGE NOTICE (GPL-2, section 2a): this file was modified by Chris Arena
-    on 2026-10-11 through 2026-10-13, and is not as William McCune released it
+    on 2026-10-11 through 2026-10-30, and is not as William McCune released it
     in LADR-2009-11A. What changed and why is in FIXES.md; this file's own
     diff against the unmodified release is
 
@@ -723,8 +723,8 @@ void assign_parm(int id, int val, BOOL echo)
       for (p = Parms[id].dependencies; p; p = p->next) {
 	if (p->type == PARMT) {
 	  /* parm -> parm */
-	  /* A derived value must not be allowed to abort the program.
-	     Three things used to go wrong here:
+	  /* A legal assignment must not derive a value that aborts the
+	     program.  Three things used to go wrong here:
 	       assign(max_minutes,-1) scaled the "no limit" sentinel to
 		 max_seconds=-60, out of range [-1..INT_MAX] -> fatal;
 	       assign(max_minutes,50000000) overflowed 60*val (signed
@@ -732,9 +732,12 @@ void assign_parm(int id, int val, BOOL echo)
 	       assign(pick_given_ratio,-1) derived weight_part=-1, out
 		 of range [0..INT_MAX] -> fatal.
 	     So: leave a negative sentinel unscaled, saturate instead of
-	     overflowing, and clamp into the dependent parm's range.
-	     A value the user assigns directly is still range-checked
-	     above; only derived values are clamped. */
+	     overflowing, and raise a negative sentinel to the dependent
+	     parm's minimum.  Nothing else is clamped up: a non-negative
+	     value that derives below the minimum still fails the range
+	     check.  That keeps mace4 -n 0 and -n 1 (start_size 0 or 1,
+	     minimum 2) fatal errors; clamping them searched no size at
+	     all and then reported "exhausted". */
 	  int dval;
 	  if (!p->multiply)
 	    dval = p->val;
@@ -744,7 +747,7 @@ void assign_parm(int id, int val, BOOL echo)
 	    dval = INT_MAX;
 	  else
 	    dval = p->val * val;
-	  if (dval < Parms[p->id].min)
+	  if (val < 0 && dval < Parms[p->id].min)
 	    dval = Parms[p->id].min;
 	  else if (dval > Parms[p->id].max)
 	    dval = Parms[p->id].max;
